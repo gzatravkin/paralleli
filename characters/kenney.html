@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Paralleli — персонажи: отбор</title>
+<style>
+:root{
+  --bg:#12151c; --bg2:#171b24; --bg3:#1d2230; --line:#2a3040;
+  --fg:#dfe4ef; --dim:#8891a4; --dim2:#666e80;
+  --acc:#ffb347; --ok:#5fd68a; --no:#e2555f; --era:#c58bff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.55 "Segoe UI",system-ui,sans-serif;padding-bottom:80px}
+a{color:var(--acc)}
+h1,h2,h3{font-weight:600;letter-spacing:.2px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+header{position:sticky;top:0;z-index:50;background:rgba(18,21,28,.96);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.hbar{display:flex;align-items:center;gap:16px;padding:12px 0;flex-wrap:wrap}
+.hbar h1{margin:0;font-size:17px}
+.hbar h1 small{color:var(--dim);font-weight:400;font-size:12px;display:block}
+.spacer{flex:1}
+.prog{font-size:12px;color:var(--dim);white-space:nowrap}
+.prog b{color:var(--acc)}
+button{font:inherit;color:var(--fg);background:var(--bg3);border:1px solid var(--line);
+  border-radius:6px;padding:6px 12px;cursor:pointer;transition:.12s}
+button:hover{background:#242b3b;border-color:#3a4256}
+button.pri{background:var(--acc);color:#1a1206;border-color:var(--acc);font-weight:600}
+button.pri:hover{background:#ffc266}
+input[type=range]{accent-color:var(--acc);width:110px;vertical-align:middle}
+select{font:inherit;background:var(--bg3);color:var(--fg);border:1px solid var(--line);
+  border-radius:6px;padding:6px 10px}
+.tabs{display:flex;gap:4px;padding:0 0 10px}
+.tabs a{padding:7px 16px;border-radius:7px 7px 0 0;text-decoration:none;font-size:13px;
+  background:var(--bg3);color:var(--dim);border:1px solid var(--line);border-bottom:none}
+.tabs a.on{background:var(--acc);color:#1a1206;font-weight:600;border-color:var(--acc)}
+section{margin:34px 0}
+.stitle{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);
+  padding-bottom:8px;margin-bottom:6px}
+.stitle h2{margin:0;font-size:16px;color:var(--acc)}
+.stitle .cnt{font-size:11px;color:var(--dim2);margin-left:auto}
+.lead{color:var(--dim);font-size:13px;margin:8px 0 16px;max-width:90ch}
+details.brief{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:14px 18px;margin:20px 0}
+details.brief>summary{cursor:pointer;font-weight:600;color:var(--acc);font-size:15px;outline:none}
+details.brief[open]>summary{margin-bottom:12px}
+.brief h3{color:var(--fg);font-size:14px;margin:18px 0 6px}
+.brief p,.brief li{color:var(--dim);font-size:13px}
+.brief table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px}
+.brief th,.brief td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+.brief th{background:var(--bg3);color:var(--fg);font-weight:600}
+.brief td{color:var(--dim)}
+.brief code{background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--acc);font-size:12px}
+.warn{background:#3a2410;border:1px solid #6b4515;color:#f0c07a;border-radius:8px;
+  padding:12px 16px;font-size:13px;margin:14px 0}
+.warn b{color:#ffd9a0}
+
+/* карточка персонажа */
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  margin:14px 0;overflow:hidden}
+.card.yes{box-shadow:inset 4px 0 0 var(--ok);background:rgba(95,214,138,.05)}
+.card.no{box-shadow:inset 4px 0 0 var(--no);opacity:.5}
+.chead{padding:11px 16px;border-bottom:1px solid var(--line);background:var(--bg3);
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.chead h3{margin:0;font-size:14.5px}
+.chead .pack{font-size:11.5px;color:var(--dim2);background:var(--bg);padding:2px 8px;
+  border-radius:4px;border:1px solid var(--line)}
+.chead .note{font-size:12.5px;color:var(--dim);flex-basis:100%;margin-top:2px}
+.tag{font-size:10.5px;padding:2px 7px;border-radius:4px;border:1px solid var(--line);
+  color:var(--dim2);white-space:nowrap}
+.tag.cc0{color:var(--ok);border-color:#2c5c3e}
+.tag.by{color:#e0c060;border-color:#5c4a1e}
+.tag.px{color:var(--era);border-color:#4a3266}
+.tag.synth{color:#7fb8ff;border-color:#2c4a6b}
+.vote{display:flex;gap:5px;margin-left:auto}
+.vote button{width:38px;padding:5px 0;font-size:13px}
+.vote button.a.on{background:var(--ok);color:#0d2114;border-color:var(--ok)}
+.vote button.r.on{background:var(--no);color:#2a0d10;border-color:var(--no)}
+.anims{display:flex;gap:0;flex-wrap:wrap}
+.an{flex:1;min-width:118px;padding:12px 8px 10px;text-align:center;
+  border-right:1px solid #212734}
+.an:last-child{border-right:none}
+.an .stage{height:140px;display:flex;align-items:flex-end;justify-content:center;
+  background:linear-gradient(180deg,#151922,#1b212c);border-radius:7px;
+  border:1px solid #232a38;padding:8px;position:relative;overflow:hidden}
+.an .stage::after{content:'';position:absolute;left:8px;right:8px;bottom:7px;height:1px;
+  background:#2f3849}
+.an img{max-height:118px;max-width:100%;image-rendering:auto;display:block}
+.an.px img{image-rendering:pixelated}
+.an .lbl{font-size:11.5px;color:var(--dim);margin-top:7px}
+.an .lbl b{color:var(--fg);display:block;font-size:12.5px}
+.an.miss .stage{opacity:.35}
+.an.miss .lbl b{color:var(--no)}
+
+/* парная сцена */
+.pair{background:linear-gradient(160deg,#1a2030,#151922);border:1px solid #303a52;
+  border-radius:12px;padding:18px 20px}
+.pairctl{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.pairctl label{font-size:12px;color:var(--dim)}
+.scene{height:240px;background:linear-gradient(180deg,#141922 0%,#1c2431 70%,#232c3c 100%);
+  border-radius:10px;border:1px solid #2a3446;display:flex;align-items:flex-end;
+  justify-content:center;gap:60px;padding:0 30px 26px;position:relative;overflow:hidden}
+.scene::after{content:'';position:absolute;left:0;right:0;bottom:22px;height:2px;
+  background:linear-gradient(90deg,transparent,#3a475e,transparent)}
+.scene figure{margin:0;text-align:center;position:relative;z-index:2}
+.scene img{display:block;max-height:200px}
+.scene figcaption{font-size:11px;color:var(--dim2);margin-top:6px}
+#exp{position:fixed;inset:0;background:rgba(8,10,14,.86);z-index:100;display:none;
+  align-items:center;justify-content:center;padding:30px}
+#exp.on{display:flex}
+#exp .box{background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  width:min(880px,100%);max-height:100%;display:flex;flex-direction:column;padding:18px}
+#exp textarea{flex:1;min-height:380px;background:var(--bg);color:var(--fg);
+  border:1px solid var(--line);border-radius:8px;padding:12px;
+  font:12px/1.5 ui-monospace,Consolas,monospace;resize:vertical}
+footer{color:var(--dim2);font-size:11.5px;border-top:1px solid var(--line);
+  margin-top:40px;padding-top:16px}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <div class="tabs">
+    <a href="../audio/">Звук</a>
+    <a href="./" class="on">Персонажи</a>
+  </div>
+  <div class="hbar" style="padding-top:0">
+  <h1>Paralleli — персонажи<small>отец и ребёнок · бег, лазанье, прыжок, плавание · всё free-to-use</small></h1>
+  <div class="spacer"></div>
+  <label class="prog">скорость <input type="range" id="spd" min="2" max="16" step="1" value="8"></label>
+  <div class="prog" id="prog">—</div>
+  <button onclick="clearAll()">сброс</button>
+  <button onclick="shareLink()">ссылка с моим выбором</button>
+  <button class="pri" onclick="showExport()">выгрузить решения</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+
+<div class="warn">
+  <b>Главный вопрос — до того как выбирать персонажа.</b>
+  В ART-LIST записано: пиксель-арт не берём, потому что у нас уже есть свет, свечение и
+  переходы, а в пиксель-арте свет рисуется пикселями. Проблема в том, что <b>бесплатные
+  персонажи с полным набором «бег + лазанье + прыжок + плавание» — почти все пиксельные.</b>
+  Плавание редкость даже в платных паках.<br><br>
+  Выход нашёлся: <b>паки Kenney</b> — не пиксель, вектор, чистые силуэты, CC0, и у одного из них
+  плавание есть <i>из коробки</i>. Ниже они идут первыми. Пиксельные варианты оставил в самом
+  низу отдельным блоком — просто чтобы было видно, от чего мы отказываемся.
+</div>
+
+<details class="brief" open>
+<summary>Что именно нам нужно от персонажа (и почему)</summary>
+
+<h3>Набор анимаций диктуется механикой, а не вкусом</h3>
+<p>По MECHANICS.md персонаж умеет ровно это — больше ничего искать не надо:</p>
+<table>
+<tr><th>анимация</th><th>откуда взялась в механике</th><th>критично?</th></tr>
+<tr><td><b>покой</b></td><td>стоит на месте, игрок думает над загадкой</td><td>да</td></tr>
+<tr><td><b>ходьба / бег</b></td><td>основное перемещение</td><td>да</td></tr>
+<tr><td><b>прыжок + падение</b></td><td>прыжок, провал сквозь ветхий пол в будущем</td><td>да</td></tr>
+<tr><td><b>лазанье</b></td><td>лиана-лестница при норме растительности; вид со спины</td><td>да</td></tr>
+<tr><td><b>плавание</b></td><td>вода при норме температуры: плывёшь, но не выпрыгнешь на высокий берег</td><td>да</td></tr>
+<tr><td>отскок / полёт</td><td>пружина в жару, гейзер — можно взять кадр прыжка</td><td>нет</td></tr>
+<tr><td>испуг</td><td>поза ребёнка в начале</td><td>для ребёнка</td></tr>
+</table>
+<p><b>Смертей в игре нет</b>, поэтому анимации смерти, ранения и атаки не нужны вообще —
+это сразу отсекает большинство «геройских» паков, где половина кадров про бой.</p>
+
+<h3>Отец и ребёнок должны быть из одного пака</h3>
+<p>Это не экономия, а сюжет: они родственники, и глаз должен считывать это мгновенно.
+Два персонажа из разных паков будут выглядеть как гости из разных игр. Поэтому ниже
+и отец, и ребёнок выбираются <b>внутри одного семейства</b>, а разница в возрасте делается
+масштабом: ребёнок ≈ <b>62%</b> роста отца. В блоке «Пара» это можно проверить глазами.</p>
+
+<h3>Читаемость силуэта важнее детализации</h3>
+<p>Карта существует в 27 версиях, фон постоянно меняется — персонаж должен оставаться
+опознаваемым на любом из них. Значит: компактный плотный силуэт, минимум тонких деталей,
+контрастный к фону цвет. Мелкий пиксельный персонаж на меняющемся фоне теряется, крупный
+векторный — нет.</p>
+
+<h3>Про плавание — честно</h3>
+<p>Плавание есть только у <b>Kenney Platformer Characters</b>. У остальных я его
+<b>синтезировал</b>: взял позу бега и наклонил на 55°. Такие кадры помечены значком
+<span class="tag synth">синтез</span>. Выглядит достаточно для джема, но это не настоящая
+анимация плавания — если критично, это единственный аргумент в пользу первого семейства.</p>
+<p>Поворачивать позу <i>лазанья</i> нельзя, хотя это первое, что приходит в голову: она
+нарисована со спины и в горизонтальном положении читается как «упал лицом вниз».</p>
+
+<h3>Как отбирать</h3>
+<p>Всё анимируется прямо на странице, скорость — ползунком в шапке. Смотри не на красоту
+отдельного кадра, а на <b>походку</b> и на то, читается ли поза лазанья и плавания.
+Жми <b>✓</b> / <b>✗</b>, потом «ссылка с моим выбором» — как на странице звука.</p>
+</details>
+
+<div id="host"></div>
+
+<!-- ПАРА -->
+<section>
+<div class="stitle"><h2>Пара: отец и ребёнок в одном кадре</h2></div>
+<p class="lead">Главная проверка. Выбери сочетание и посмотри: читаются ли они как родственники,
+видна ли разница в возрасте по силуэту, не сливаются ли. Ребёнок масштабируется ползунком —
+подбери момент, когда он ещё ребёнок, но уже не «мелкий отец».</p>
+<div class="pair">
+  <div class="pairctl">
+    <label>отец <select id="pf" onchange="drawPair()"></select></label>
+    <label>ребёнок <select id="pc" onchange="drawPair()"></select></label>
+    <label>анимация <select id="pa" onchange="drawPair()"></select></label>
+    <label>рост ребёнка <input type="range" id="ps" min="40" max="85" value="62" oninput="drawPair()">
+      <span id="psv" style="color:var(--acc);font-size:12px">62%</span></label>
+  </div>
+  <div class="scene" id="scene"></div>
+</div>
+</section>
+
+<footer class="wrap" id="credits"></footer>
+</div>
+
+<div id="exp"><div class="box">
+  <h3 style="margin:0 0 10px">Решения — скинь этот текст мне</h3>
+  <textarea id="exptext" spellcheck="false"></textarea>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="pri" onclick="copyExport()">копировать</button>
+    <button onclick="document.getElementById('exp').classList.remove('on')">закрыть</button>
+    <span id="copied" style="color:var(--ok);font-size:12px;align-self:center"></span>
+  </div>
+</div></div>
+
+<script>
+/* ============ ДАННЫЕ ============
+   frames: сколько кадров у каждой анимации (0 = нет в паке)
+   synth:  какие анимации я собрал сам, а не взял готовыми          */
+const KEN='https://kenney.nl/assets/';
+const C=(id,nm,pack,url,note,frames,opt={})=>Object.assign(
+  {id,nm,pack,url,note,frames,lic:'CC0',px:false,synth:[]},opt);
+
+const CHARS=[
+ // --- Kenney Platformer Characters: единственные с родным плаванием
+ C('pc-soldier','Бородатый / «Джоэл»','Kenney Platformer Characters',KEN+'platformer-characters',
+   'Крупный, бородатый, широкие плечи — единственный в подборке, кто выглядит как взрослый мужик, а не как подросток. Ближе всего к описанию отца.',
+   {idle:2,walk:4,jump:2,climb:2,swim:2},{role:'father',rec:1}),
+ C('pc-adventurer','Путешественник','Kenney Platformer Characters',KEN+'platformer-characters',
+   'Тёмные волосы, серая рубаха. Нейтральный взрослый, читается как «мастер в цеху».',
+   {idle:2,walk:4,jump:2,climb:2,swim:2},{role:'father'}),
+ C('pc-player','Светлый мальчик','Kenney Platformer Characters',KEN+'platformer-characters',
+   'Тот же пак, но заметно моложе лицом — идеальный ребёнок к двум предыдущим.',
+   {idle:2,walk:4,jump:2,climb:2,swim:2},{role:'child',rec:1}),
+ C('pc-female','Девочка','Kenney Platformer Characters',KEN+'platformer-characters',
+   'Вариант ребёнка, если ребёнок — дочь. Тот же стиль.',
+   {idle:2,walk:4,jump:2,climb:2,swim:2},{role:'child'}),
+
+ // --- Kenney Toon: лучшая походка, плавание синтезировано
+ C('tc-male-adv','Тун: путешественник','Kenney Toon Characters',KEN+'toon-characters',
+   'Самая живая походка в подборке: 8 кадров ходьбы + отдельный бег на 3 кадра. Рисовка мягче и современнее, лучше стыкуется со свечением. Плавания в паке нет.',
+   {idle:1,walk:8,run:3,jump:2,climb:2,swim:3},{role:'father',rec:1,synth:['swim']}),
+ C('tc-male-person','Тун: горожанин','Kenney Toon Characters',KEN+'toon-characters',
+   'Тот же набор, проще одет — больше похож на рабочего, чем на искателя приключений.',
+   {idle:1,walk:8,run:3,jump:2,climb:2,swim:3},{role:'both',synth:['swim']}),
+ C('tc-female-person','Тун: девочка','Kenney Toon Characters',KEN+'toon-characters',
+   'Ребёнок к туновскому отцу.',
+   {idle:1,walk:8,run:3,jump:2,climb:2,swim:3},{role:'child',rec:1,synth:['swim']}),
+ C('tc-female-adv','Тун: путешественница','Kenney Toon Characters',KEN+'toon-characters',
+   'Ещё вариант ребёнка/второго взрослого.',
+   {idle:1,walk:8,run:3,jump:2,climb:2,swim:3},{role:'both',synth:['swim']}),
+
+ // --- Deluxe: отличная ходьба, но нет лазанья и плавания
+ C('pad-p1','Deluxe: зелёный','Kenney Platformer Art Deluxe',KEN+'platformer-art-deluxe',
+   'Плавная ходьба на 11 кадров, самый «мультяшно-плоский» стиль. НЕТ лазанья и плавания — а это две наши ключевые механики.',
+   {idle:1,walk:11,jump:1},{role:'both'}),
+ C('pad-p2','Deluxe: синий','Kenney Platformer Art Deluxe',KEN+'platformer-art-deluxe',
+   'То же самое, другой цвет — годится как пара «отец/ребёнок» по цвету одежды.',
+   {idle:1,walk:11,jump:1},{role:'both'}),
+ C('pad-p3','Deluxe: розовый','Kenney Platformer Art Deluxe',KEN+'platformer-art-deluxe',
+   'Третий цвет того же персонажа.',
+   {idle:1,walk:11,jump:1},{role:'both'}),
+
+ // --- Simplified: минимализм
+ C('sp-char','Минималист','Kenney Simplified Platformer',KEN+'simplified-platformer-pack',
+   'Предельно простой силуэт без лица. Плюс: никогда не поспорит с фоном и отлично читается в 27 мирах. Минус: ноль эмоции, а у нас вся история про отца и ребёнка.',
+   {idle:1,walk:4,jump:1,climb:2,swim:2},{role:'both',synth:['swim']}),
+
+ // --- не-Kenney
+ C('oga-bigeyesboy','Мальчик с большими глазами','OpenGameArt · bevouliin',
+   'https://opengameart.org/content/big-eyes-boy-game-character-sprites',
+   'Толстый чёрный контур, мобильно-мультяшный. Ребёнок как ребёнок, но стиль спорит с нашей мрачноватой атмосферой. Только бег и прыжок — ни лазанья, ни плавания.',
+   {idle:1,walk:6,jump:3},{role:'child'}),
+];
+
+// пиксельные — отдельным блоком, «от чего отказываемся»
+const PIXEL=[
+ {id:'oga-caveman',nm:'Пещерный человек',pack:'OpenGameArt · chasersgaming',
+  url:'https://opengameart.org/content/character-animations-caveman',lic:'CC0',
+  note:'Готовые GIF: бег, прыжок, лазанье и траверс по уступу. Набор движений богаче всех Kenney — но это пиксель-арт со всеми вытекающими для света.',
+  gifs:[['walk','бег'],['jump','прыжок'],['climb','лазанье'],['shimmy','траверс']]},
+ {id:'oga-forestboy',nm:'Лесной мальчик 24×24',pack:'OpenGameArt · patvanmackelberg',
+  url:'https://opengameart.org/content/forest-boy-platformer-animated-character-24x24',lic:'CC0',
+  note:'Целый лист спрайтов ребёнка. Мелкий (24×24) — на нашем меняющемся фоне потеряется.',
+  sheet:'sheet.png'},
+];
+
+const ANIMS=[['idle','покой'],['walk','ходьба'],['run','бег'],['jump','прыжок'],
+             ['climb','лазанье'],['swim','плавание']];
+
+/* ============ СОСТОЯНИЕ ============ */
+const LS='paralleli-chars-review';
+let V=JSON.parse(localStorage.getItem(LS)||'{}');
+const save=()=>{localStorage.setItem(LS,JSON.stringify(V));updProg();};
+const src=(id,an,i)=>`candidates/${id}/${an}_${i}.png`;
+
+/* ============ ОТРИСОВКА ============ */
+const REG=[]; // {img, id, an, n, i}
+function cardHTML(c){
+  const st=V[c.id]||'';
+  let cells='';
+  ANIMS.forEach(([an,ru])=>{
+    const n=c.frames[an]||0;
+    const isSyn=c.synth.includes(an);
+    if(!n){ cells+=`<div class="an miss"><div class="stage"></div>
+      <div class="lbl"><b>нет</b>${ru}</div></div>`; return; }
+    cells+=`<div class="an${c.px?' px':''}">
+      <div class="stage"><img data-id="${c.id}" data-an="${an}" data-n="${n}" src="${src(c.id,an,0)}" alt="${ru}"></div>
+      <div class="lbl"><b>${ru}</b>${n} кадр${n>4?'ов':n>1?'а':''}${isSyn?' · синтез':''}</div></div>`;
+  });
+  return `<div class="card ${st}" id="card-${c.id}">
+    <div class="chead">
+      <h3>${c.nm}</h3>
+      <span class="pack">${c.pack}</span>
+      <a class="tag cc0" href="${c.url}" target="_blank">${c.lic}</a>
+      ${c.rec?'<span class="tag" style="color:var(--acc);border-color:#5c4a1e">рекомендую</span>':''}
+      ${c.synth.length?'<span class="tag synth">плавание синтезировано</span>':''}
+      <div class="vote">
+        <button class="a ${st==='yes'?'on':''}" onclick="vote('${c.id}','yes')">✓</button>
+        <button class="r ${st==='no'?'on':''}" onclick="vote('${c.id}','no')">✗</button>
+      </div>
+      <div class="note">${c.note}</div>
+    </div>
+    <div class="anims">${cells}</div>
+  </div>`;
+}
+function pixelHTML(p){
+  const st=V[p.id]||'';
+  let cells='';
+  if(p.gifs) p.gifs.forEach(([g,ru])=>{ cells+=`<div class="an px">
+    <div class="stage"><img src="candidates/${p.id}/${g}.gif" alt="${ru}"></div>
+    <div class="lbl"><b>${ru}</b>готовый GIF</div></div>`; });
+  if(p.sheet) cells=`<div class="an px" style="flex:1"><div class="stage" style="height:220px">
+    <img src="candidates/${p.id}/${p.sheet}" style="max-height:200px"></div>
+    <div class="lbl"><b>лист спрайтов</b>нарезать вручную</div></div>`;
+  return `<div class="card ${st}" id="card-${p.id}">
+    <div class="chead"><h3>${p.nm}</h3><span class="pack">${p.pack}</span>
+      <a class="tag cc0" href="${p.url}" target="_blank">${p.lic}</a>
+      <span class="tag px">пиксель-арт</span>
+      <div class="vote">
+        <button class="a ${st==='yes'?'on':''}" onclick="vote('${p.id}','yes')">✓</button>
+        <button class="r ${st==='no'?'on':''}" onclick="vote('${p.id}','no')">✗</button>
+      </div>
+      <div class="note">${p.note}</div></div>
+    <div class="anims">${cells}</div></div>`;
+}
+function render(){
+  const groups=[
+    ['Отец — основные кандидаты','Крупный взрослый силуэт. Смотри на походку и на то, читается ли поза лазанья.',
+      CHARS.filter(c=>c.role==='father')],
+    ['Ребёнок','Тот же пак, что и отец — иначе они будут из разных игр. Масштаб подбирается в блоке «Пара».',
+      CHARS.filter(c=>c.role==='child')],
+    ['Подходят на обе роли','Один и тот же персонаж отцом и ребёнком (разный масштаб + цвет одежды) — самый дешёвый путь.',
+      CHARS.filter(c=>c.role==='both')],
+  ];
+  let h='';
+  groups.forEach(([t,lead,list])=>{
+    if(!list.length)return;
+    h+=`<section><div class="stitle"><h2>${t}</h2><span class="cnt">${list.length}</span></div>
+        <p class="lead">${lead}</p>${list.map(cardHTML).join('')}</section>`;
+  });
+  h+=`<section><div class="stitle"><h2>Пиксель-арт — от чего отказываемся</h2>
+      <span class="cnt">${PIXEL.length}</span></div>
+      <p class="lead">Показываю честно: по количеству движений пиксельные паки богаче.
+      Если решим, что свет и свечение переживут пиксель-арт — вот куда идти.</p>
+      ${PIXEL.map(pixelHTML).join('')}</section>`;
+  document.getElementById('host').innerHTML=h;
+  document.querySelectorAll('.an img[data-id]').forEach(img=>{
+    REG.push({img,id:img.dataset.id,an:img.dataset.an,n:+img.dataset.n,i:0});
+  });
+  fillPair(); updProg(); renderCredits();
+}
+function vote(id,v){ V[id]=(V[id]===v?'':v); save();
+  const c=document.getElementById('card-'+id); c.className='card '+(V[id]||'');
+  c.querySelector('.vote .a').classList.toggle('on',V[id]==='yes');
+  c.querySelector('.vote .r').classList.toggle('on',V[id]==='no'); }
+function allIds(){ return CHARS.map(c=>c.id).concat(PIXEL.map(p=>p.id)); }
+function updProg(){ const ids=allIds();
+  const dec=ids.filter(i=>V[i]).length, yes=ids.filter(i=>V[i]==='yes').length;
+  document.getElementById('prog').innerHTML=`решено <b>${dec}</b>/${ids.length} · взято <b>${yes}</b>`; }
+function clearAll(){ if(!confirm('Стереть все решения?'))return; V={}; save();
+  document.querySelectorAll('.card').forEach(c=>{c.className='card';
+    c.querySelectorAll('.vote button').forEach(b=>b.classList.remove('on'));}); }
+
+/* ============ АНИМАЦИЯ ============ */
+let fps=8, acc=0, last=0;
+document.getElementById('spd').oninput=e=>fps=+e.target.value;
+function tick(t){
+  if(!last)last=t;
+  if(t-last >= 1000/fps){
+    last=t;
+    REG.forEach(r=>{ if(r.n<2)return; r.i=(r.i+1)%r.n; r.img.src=src(r.id,r.an,r.i); });
+    stepPair();
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* ============ ПАРА ============ */
+let PAIR={f:null,c:null,an:'walk',fi:0,ci:0};
+function fillPair(){
+  const fs=document.getElementById('pf'), cs=document.getElementById('pc'), as=document.getElementById('pa');
+  const fathers=CHARS.filter(c=>c.role==='father'||c.role==='both');
+  const kids=CHARS.filter(c=>c.role==='child'||c.role==='both');
+  fs.innerHTML=fathers.map(c=>`<option value="${c.id}">${c.nm}</option>`).join('');
+  cs.innerHTML=kids.map(c=>`<option value="${c.id}">${c.nm}</option>`).join('');
+  as.innerHTML=ANIMS.map(([a,ru])=>`<option value="${a}"${a==='walk'?' selected':''}>${ru}</option>`).join('');
+  drawPair();
+}
+function byId(id){ return CHARS.find(c=>c.id===id); }
+function drawPair(){
+  const f=byId(document.getElementById('pf').value), c=byId(document.getElementById('pc').value);
+  const an=document.getElementById('pa').value, sc=+document.getElementById('ps').value;
+  document.getElementById('psv').textContent=sc+'%';
+  if(!f||!c)return;
+  PAIR={f,c,an,fi:0,ci:0,sc};
+  const fn=f.frames[an]||0, cn=c.frames[an]||0;
+  document.getElementById('scene').innerHTML=`
+    <figure><img id="pimf" src="${fn?src(f.id,an,0):src(f.id,'idle',0)}" style="max-height:200px">
+      <figcaption>${f.nm}${fn?'':' — нет «'+an+'», показан покой'}</figcaption></figure>
+    <figure><img id="pimc" src="${cn?src(c.id,an,0):src(c.id,'idle',0)}" style="max-height:${200*sc/100}px">
+      <figcaption>${c.nm} · ${sc}%${cn?'':' — нет «'+an+'», показан покой'}</figcaption></figure>`;
+}
+function stepPair(){
+  if(!PAIR.f)return;
+  const fi=document.getElementById('pimf'), ci=document.getElementById('pimc');
+  if(!fi||!ci)return;
+  const fa=PAIR.f.frames[PAIR.an]?PAIR.an:'idle', ca=PAIR.c.frames[PAIR.an]?PAIR.an:'idle';
+  const fn=PAIR.f.frames[fa]||1, cn=PAIR.c.frames[ca]||1;
+  PAIR.fi=(PAIR.fi+1)%fn; PAIR.ci=(PAIR.ci+1)%cn;
+  fi.src=src(PAIR.f.id,fa,PAIR.fi); ci.src=src(PAIR.c.id,ca,PAIR.ci);
+}
+
+/* ============ ССЫЛКА / ЭКСПОРТ ============ */
+function encodeVotes(){ return btoa(allIds().map(i=>V[i]==='yes'?'y':V[i]==='no'?'n':'.').join('')).replace(/=+$/,''); }
+function decodeVotes(b){ try{ const s=atob(b), ids=allIds(); if(s.length!==ids.length)return null;
+  const o={}; ids.forEach((id,i)=>{ if(s[i]==='y')o[id]='yes'; else if(s[i]==='n')o[id]='no'; }); return o;
+}catch(e){return null;} }
+function shareLink(){
+  const who=(prompt('Твоё имя (чтобы я понимал, чей это выбор):','')||'').trim();
+  const url=location.origin+location.pathname+'#v='+encodeVotes()+(who?'&by='+encodeURIComponent(who):'');
+  navigator.clipboard.writeText(url).then(()=>alert('Ссылка скопирована — кидай в чат.\n\n'+url),
+    ()=>prompt('Скопируй вручную:',url));
+}
+(function(){ const m=location.hash.match(/[#&]v=([A-Za-z0-9+/]+)/); if(!m)return;
+  const by=(location.hash.match(/[#&]by=([^&]*)/)||[])[1];
+  const got=decodeVotes(m[1]); if(!got)return;
+  const name=by?decodeURIComponent(by):'кто-то из команды';
+  if(confirm(`В ссылке лежит выбор: ${name}.\n\n`+(Object.keys(V).length
+    ?'У тебя уже есть свои отметки. Загрузить чужие ПОВЕРХ своих?':'Загрузить его?'))){
+    V=got; localStorage.setItem(LS,JSON.stringify(V)); }
+})();
+function showExport(){
+  let out='# Paralleli — отбор персонажей\n\n';
+  const all=CHARS.concat(PIXEL);
+  const yes=all.filter(c=>V[c.id]==='yes'), no=all.filter(c=>V[c.id]==='no'), un=all.filter(c=>!V[c.id]);
+  out+='## ВЗЯТО\n'+(yes.length?yes.map(c=>`- ${c.nm} (${c.id}) — ${c.pack}`).join('\n'):'- ничего')+'\n\n';
+  out+='## Отклонено\n'+(no.length?no.map(c=>`- ${c.nm}`).join('\n'):'- —')+'\n\n';
+  out+='## Не смотрел\n'+(un.length?un.map(c=>`- ${c.nm}`).join('\n'):'- —')+'\n\n';
+  out+='## Пара сейчас\n- отец: '+(PAIR.f?PAIR.f.nm:'—')+'\n- ребёнок: '+(PAIR.c?PAIR.c.nm:'—')
+     +'\n- рост ребёнка: '+(document.getElementById('ps').value)+'%\n';
+  out+='\n# JSON\n'+JSON.stringify(V);
+  document.getElementById('exptext').value=out;
+  document.getElementById('exp').classList.add('on');
+}
+function copyExport(){ const t=document.getElementById('exptext'); t.select();
+  navigator.clipboard.writeText(t.value).then(()=>{
+    document.getElementById('copied').textContent='скопировано';
+    setTimeout(()=>document.getElementById('copied').textContent='',1800);}); }
+function renderCredits(){
+  const m={}; CHARS.concat(PIXEL).forEach(c=>m[c.pack+'|'+c.lic+'|'+c.url]=1);
+  document.getElementById('credits').innerHTML=
+   '<b>Лицензии.</b> Всё в подборке — <b>CC0</b>: можно использовать, менять и продавать, '+
+   'указывать автора не обязательно. Для джема это лучший вариант — никаких обязательств в титрах.<br><br>'+
+   '<b>Источники:</b> '+Object.keys(m).map(k=>{const[p,l,u]=k.split('|');
+     return `<a href="${u}" target="_blank">${p}</a> (${l})`;}).join(' · ')+
+   '<br><br>Кадры разложены скриптом <code>build-chars.sh</code>; полные паки — в <code>chars/_src/</code>. '+
+   'Кадры плавания с пометкой «синтез» получены наклоном позы бега на −55°.';
+}
+render();
+</script>
+</body>
+</html>
