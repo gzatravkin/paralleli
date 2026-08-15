@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Paralleli — звук: отбор кандидатов</title>
+<style>
+:root{
+  --bg:#12151c; --bg2:#171b24; --bg3:#1d2230; --line:#2a3040;
+  --fg:#dfe4ef; --dim:#8891a4; --dim2:#666e80;
+  --acc:#ffb347; --ok:#5fd68a; --no:#e2555f;
+  --cold:#6fc6ff; --heat:#ff8a5c; --plant:#8bd97a; --era:#c58bff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.55 "Segoe UI",system-ui,sans-serif;padding-bottom:80px}
+a{color:var(--acc)}
+h1,h2,h3{font-weight:600;letter-spacing:.2px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+
+/* ---- шапка ---- */
+header{position:sticky;top:0;z-index:50;background:rgba(18,21,28,.96);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.hbar{display:flex;align-items:center;gap:18px;padding:12px 0;flex-wrap:wrap}
+.hbar h1{margin:0;font-size:17px}
+.hbar h1 small{color:var(--dim);font-weight:400;font-size:12px;display:block}
+.spacer{flex:1}
+.prog{font-size:12px;color:var(--dim);white-space:nowrap}
+.prog b{color:var(--acc)}
+button{font:inherit;color:var(--fg);background:var(--bg3);border:1px solid var(--line);
+  border-radius:6px;padding:6px 12px;cursor:pointer;transition:.12s}
+button:hover{background:#242b3b;border-color:#3a4256}
+button.pri{background:var(--acc);color:#1a1206;border-color:var(--acc);font-weight:600}
+button.pri:hover{background:#ffc266}
+input[type=range]{accent-color:var(--acc);width:110px;vertical-align:middle}
+
+/* ---- секции ---- */
+section{margin:34px 0}
+.stitle{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);
+  padding-bottom:8px;margin-bottom:6px}
+.stitle h2{margin:0;font-size:16px;color:var(--acc)}
+.stitle .cnt{font-size:11px;color:var(--dim2);margin-left:auto}
+.lead{color:var(--dim);font-size:13px;margin:8px 0 16px;max-width:88ch}
+
+/* ---- бриф ---- */
+details.brief{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:14px 18px;margin:20px 0}
+details.brief>summary{cursor:pointer;font-weight:600;color:var(--acc);font-size:15px;outline:none}
+details.brief[open]>summary{margin-bottom:12px}
+.brief h3{color:var(--fg);font-size:14px;margin:18px 0 6px}
+.brief p,.brief li{color:var(--dim);font-size:13px}
+.brief table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px}
+.brief th,.brief td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+.brief th{background:var(--bg3);color:var(--fg);font-weight:600}
+.brief td{color:var(--dim)}
+.brief code{background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--acc);font-size:12px}
+
+/* ---- микшер ---- */
+.mixer{background:linear-gradient(160deg,#1a2030,#151922);border:1px solid #303a52;
+  border-radius:12px;padding:18px 20px}
+.axes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:14px 0}
+.axis h4{margin:0 0 8px;font-size:12px;letter-spacing:1px;color:var(--dim)}
+.axis .seg{display:flex;gap:0;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.axis .seg button{flex:1;border:0;border-radius:0;background:transparent;padding:8px 4px;
+  font-size:12.5px;color:var(--dim)}
+.axis .seg button+button{border-left:1px solid var(--line)}
+.axis .seg button.on{color:#14181f;font-weight:700}
+.axis[data-a=t] .seg button.on{background:var(--cold)}
+.axis[data-a=t] .seg button.on[data-v="2"]{background:var(--heat)}
+.axis[data-a=e] .seg button.on{background:var(--era)}
+.axis[data-a=p] .seg button.on{background:var(--plant)}
+.mixnow{font-size:12px;color:var(--dim);margin-top:12px;line-height:1.7}
+.mixnow b{color:var(--fg)}
+.mixnow .lay{display:inline-block;background:var(--bg3);border:1px solid var(--line);
+  border-radius:5px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11.5px}
+.warn{background:#3a2410;border:1px solid #6b4515;color:#f0c07a;border-radius:8px;
+  padding:10px 14px;font-size:12.5px;margin:12px 0}
+
+/* ---- группы кандидатов ---- */
+.grp{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  margin:14px 0;overflow:hidden}
+.ghead{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg3)}
+.ghead .gt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ghead h3{margin:0;font-size:14.5px}
+.ghead .when{font-size:11.5px;color:var(--dim2);background:var(--bg);padding:2px 8px;
+  border-radius:4px;border:1px solid var(--line)}
+.ghead .why{font-size:12.5px;color:var(--dim);margin-top:6px;max-width:92ch}
+.row{display:flex;align-items:center;gap:12px;padding:9px 16px;border-top:1px solid #21273400}
+.row+.row{border-top:1px solid #212734}
+.row:hover{background:#1b2029}
+.row.yes{background:rgba(95,214,138,.07);box-shadow:inset 3px 0 0 var(--ok)}
+.row.no{background:rgba(226,85,95,.05);box-shadow:inset 3px 0 0 var(--no);opacity:.55}
+.play{width:34px;height:34px;padding:0;border-radius:50%;flex:none;font-size:12px}
+.play.playing{background:var(--acc);color:#1a1206;border-color:var(--acc)}
+.meta{flex:1;min-width:0}
+.meta .nm{font-weight:600;font-size:13.5px}
+.meta .nt{font-size:12px;color:var(--dim);margin-top:1px}
+.tags{display:flex;gap:6px;flex:none;align-items:center}
+.tag{font-size:10.5px;padding:2px 7px;border-radius:4px;border:1px solid var(--line);
+  color:var(--dim2);white-space:nowrap}
+.tag.cc0{color:var(--ok);border-color:#2c5c3e}
+.tag.by{color:#e0c060;border-color:#5c4a1e}
+.tag.sa{color:var(--no);border-color:#5c2830}
+.tag.mix{color:var(--era);border-color:#4a3266}
+.vote{display:flex;gap:5px;flex:none}
+.vote button{width:36px;padding:5px 0;font-size:13px}
+.vote button.a.on{background:var(--ok);color:#0d2114;border-color:var(--ok)}
+.vote button.r.on{background:var(--no);color:#2a0d10;border-color:var(--no)}
+.tintbar{padding:10px 16px;border-top:1px dashed #2b3244;background:#161a22;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+.tintbar button{padding:5px 10px;font-size:12px}
+
+/* ---- экспорт ---- */
+#exp{position:fixed;inset:0;background:rgba(8,10,14,.86);z-index:100;display:none;
+  align-items:center;justify-content:center;padding:30px}
+#exp.on{display:flex}
+#exp .box{background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  width:min(880px,100%);max-height:100%;display:flex;flex-direction:column;padding:18px}
+#exp textarea{flex:1;min-height:400px;background:var(--bg);color:var(--fg);
+  border:1px solid var(--line);border-radius:8px;padding:12px;
+  font:12px/1.5 ui-monospace,Consolas,monospace;resize:vertical}
+footer{color:var(--dim2);font-size:11.5px;border-top:1px solid var(--line);
+  margin-top:40px;padding-top:16px}
+</style>
+</head>
+<body>
+
+<header><div class="wrap hbar">
+  <h1>Paralleli — звук<small>отбор кандидатов · всё free-to-use</small></h1>
+  <div class="spacer"></div>
+  <div class="prog" id="prog">—</div>
+  <label class="prog">громкость <input type="range" id="vol" min="0" max="1" step="0.01" value="0.75"></label>
+  <button onclick="clearAll()">сброс</button>
+  <button onclick="shareLink()">ссылка с моим выбором</button>
+  <button class="pri" onclick="showExport()">выгрузить решения</button>
+</div></header>
+
+<div class="wrap">
+
+<div id="filewarn" class="warn" style="display:none">
+  <b>Страница открыта как файл (<code>file://</code>).</b> Прослушивание работает, но
+  <b>микшер мира и живые оттенки осей — нет</b>: браузер запрещает Web Audio читать локальные файлы.
+  Запусти в папке <code>audio/</code>: <code>python -m http.server 8123</code> — и открой
+  <a href="http://localhost:8123/review.html">http://localhost:8123/review.html</a>
+</div>
+
+<!-- ============ БРИФ ============ -->
+<details class="brief" open>
+<summary>Звуковой язык игры — что и зачем мы ищем (прочти первым)</summary>
+
+<p>Собрано из того, как звук работает в играх вообще, и приложено к нашим механикам.
+Ниже — правила, по которым отобраны кандидаты. Если правило не нравится — скажи, пересоберу подборку.</p>
+
+<h3>1. Звук — это канал связи, а не украшение</h3>
+<p>У каждого действия игрока должен быть свой отчётливый отклик, иначе игрок не понимает,
+сработало или нет. Главное требование — <b>различимость</b>: событие должно опознаваться
+по звуку, не глядя на экран. У нас это критично, потому что карта одна, а миров 27:
+игрок должен слышать, что мир сменился, ещё до того как разглядит изменившиеся блоки.</p>
+
+<h3>2. Чем чаще звук — тем он проще</h3>
+<p>Правило «сочности»: сколько внимания даёт звук, столько же он и отнимает.
+Шаг звучит тысячи раз за сессию, ядро находится трижды за игру. Отсюда бюджет:</p>
+<table>
+<tr><th>частота</th><th>событие</th><th>каким должен быть</th><th>длина</th></tr>
+<tr><td>постоянно</td><td>шаг</td><td>тихий, глухой, низ-серёдка, 4–6 вариаций против «пулемёта»</td><td>~0.1 с</td></tr>
+<tr><td>часто</td><td>прыжок / приземление</td><td>короткий, без мелодии, без хвоста</td><td>~0.2 с</td></tr>
+<tr><td>средне</td><td>дверь: крутим ось ±1</td><td>механический щелчок-фиксатор, как у тумблера</td><td>~0.1 с</td></tr>
+<tr><td>редко</td><td>переход в другой мир</td><td>самый крупный звук в игре, глушит остальное</td><td>1.5–3 с</td></tr>
+<tr><td>3 раза</td><td>ядро девайса найдено</td><td>музыкальный, мажорный, «прогресс»</td><td>1–2 с</td></tr>
+<tr><td>редко</td><td>игрушка ребёнка</td><td>тёплый, живой, НЕ технологичный — единственный «человеческий» звук</td><td>0.5–1 с</td></tr>
+</table>
+
+<h3>3. Высота = смысл</h3>
+<p>Держим один тональный словарь на всю игру, чтобы игрок выучил его за минуту:</p>
+<ul>
+<li><b>вверх по высоте</b> = приобрёл, открылось, продвинулся (ядро, игрушка, вход в дверь)</li>
+<li><b>вниз по высоте</b> = потерял, закрылось, отказ (заперто, обвалился пол)</li>
+<li><b>чистый интервал / колокол</b> = награда · <b>глухой удар без тона</b> = «сюда нельзя»</li>
+</ul>
+<p>Важно для нас: <b>в игре нет смертей</b>, ось не наказывает. Значит «отказ» должен звучать
+как <i>заперто</i>, а не как <i>ошибка</i>. Никаких резких зуммеров — иначе игрок читает
+переключение мира как провал.</p>
+
+<h3>4. Три оси — три способа услышать мир</h3>
+<p>Оси у нас разной природы, и звук должен это отражать по-разному:</p>
+<table>
+<tr><th>ось</th><th>что делает в игре</th><th>чем выражаем в звуке</th></tr>
+<tr><td><b>ТЕМПЕРАТУРА</b><br>мороз · норма · жара</td>
+    <td>меняет <i>вещество</i>: вода→лёд→пар, лиана→балка/лестница/пружина</td>
+    <td><b>тембр и материал.</b> Мороз — стекло, звон, высокие, сухой хвост.
+        Жара — низ, шипение, гуд, гул. Это самая слышимая ось → ей отдаём смену музыкального трека.</td></tr>
+<tr><td><b>ЭПОХА</b><br>прошлое · настоящее · будущее</td>
+    <td>переставляет геометрию, ломает пол за спиной</td>
+    <td><b>обработка, а не новый материал.</b> Прошлое — придушенный верх + лёгкая
+        «плавающая» подкрутка, как старая запись. Будущее — большой хвост-реверб и разреженность.
+        Это <u>эффект на шине</u>, отдельных ассетов не нужно вообще.</td></tr>
+<tr><td><b>РАСТИТЕЛЬНОСТЬ</b><br>тлен · норма · буйство</td>
+    <td>добавляет/убирает массу органики</td>
+    <td><b>слой атмосферы.</b> Буйство — подкладываем живой шум (листва, птицы, вода).
+        Тлен — убираем всё живое и подкладываем сухой ветер. Норма — тишина между ними.</td></tr>
+</table>
+
+<h3>5. Ответ на «27 тем или как-то микшевать»</h3>
+<p><b>27 тем не нужны — нужно 5 файлов и две ручки обработки.</b> Три оси перемножаются
+не в контенте, а в микшере. Вертикальное наслоение (слои включаются/выключаются)
+плюс обработка целой шины — стандартная схема адаптивной музыки, она же самая дешёвая:</p>
+<table>
+<tr><th>что</th><th>сколько файлов</th><th>чем управляется</th></tr>
+<tr><td>основная тема (играет всегда, эмоциональная нить «ищу ребёнка»)</td><td>1</td><td>—</td></tr>
+<tr><td>трек мороза / трек жары (подменяют основную)</td><td>2</td><td>ТЕМПЕРАТУРА</td></tr>
+<tr><td>слой атмосферы: тлен-ветер / буйство-листва</td><td>2</td><td>РАСТИТЕЛЬНОСТЬ</td></tr>
+<tr><td>прошлое / настоящее / будущее</td><td><b>0</b></td><td>ЭПОХА — фильтр+реверб на шине</td></tr>
+</table>
+<p><b>Итого 5 музыкальных файлов → 27 разных звучаний.</b> И, что важнее для геймплея,
+переключение оси слышно <i>мгновенно и непрерывно</i>: музыка не начинается заново, она
+меняет состав. Игрок понимает «я в другом мире», не теряя нити.</p>
+<p>Ниже в блоке <b>«Микшер мира»</b> это можно покрутить руками и услышать все 27 комбинаций.
+Тот же приём применён к звуку перехода: один собранный звук + оттенок оси = 9 разных переходов
+из одного ассета (кнопки «оттенок оси» в первой группе).</p>
+
+<h3>6. Что мы намеренно НЕ ищем</h3>
+<ul>
+<li>Пиксель-арт-чиптюн: у нас уже свет, свечение и переходы — 8-битный писк с этим не стыкуется (та же логика, по которой отказались от пиксель-арта в графике).</li>
+<li>Отдельные звуки на каждую из 27 версий мира — раздувает вес и время, выигрыш нулевой.</li>
+<li>Агрессивные «ошибки» и зуммеры — в игре нет смертей и нет наказаний.</li>
+<li>Всё, что не CC0 / CC-BY. Лицензия у каждого кандидата подписана.</li>
+</ul>
+
+<h3>7. Как отбирать</h3>
+<p>В каждой группе 2–5 вариантов. Жми ▶, потом <b>✓</b> (берём) или <b>✗</b> (мимо).
+Если в группе понравились двое — отметь оба, я возьму верхний как основной.
+Решения сохраняются в твоём браузере — можно закрыть и вернуться.</p>
+<p><b>Отметки у каждого свои.</b> Когда закончишь — два способа отдать результат:
+<b>«ссылка с моим выбором»</b> (весь выбор зашит в адрес, кидай в чат — у каждого будет своя ссылка)
+или <b>«выгрузить решения»</b> (текстом). Открыв чужую ссылку, можно посмотреть его выбор,
+но она перетрёт твой — сначала сохрани свой.</p>
+</details>
+
+<!-- ============ МИКШЕР ============ -->
+<section>
+<div class="stitle"><h2>Микшер мира — послушать все 27 из 5 файлов</h2></div>
+<p class="lead">Крути оси как в игре. Музыка не перезапускается — меняется состав слоёв и обработка.
+Это и есть предлагаемая схема вместо 27 отдельных тем. Треки берутся те, что сейчас
+отмечены ✓ в музыкальных группах ниже (или первые по списку).</p>
+<div class="mixer">
+  <div class="axes">
+    <div class="axis" data-a="t"><h4>ТЕМПЕРАТУРА</h4><div class="seg" id="ax-t"></div></div>
+    <div class="axis" data-a="e"><h4>ЭПОХА</h4><div class="seg" id="ax-e"></div></div>
+    <div class="axis" data-a="p"><h4>РАСТИТЕЛЬНОСТЬ</h4><div class="seg" id="ax-p"></div></div>
+  </div>
+  <button class="pri" id="mixbtn" onclick="toggleMix()">▶ запустить микшер</button>
+  <button onclick="reloadMix()">перечитать выбранные треки</button>
+  <div class="mixnow" id="mixnow">не запущен</div>
+</div>
+</section>
+
+<div id="groups"></div>
+
+<footer class="wrap">
+  <div id="credits"></div>
+</footer>
+</div>
+
+<div id="exp"><div class="box">
+  <h3 style="margin:0 0 10px">Решения — скинь этот текст мне</h3>
+  <textarea id="exptext" spellcheck="false"></textarea>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="pri" onclick="copyExport()">копировать</button>
+    <button onclick="document.getElementById('exp').classList.remove('on')">закрыть</button>
+    <span id="copied" style="color:var(--ok);font-size:12px;align-self:center"></span>
+  </div>
+</div></div>
+
+<script>
+/* ================= ИСТОЧНИКИ ================= */
+const S = {
+  kenney:{by:'Kenney', lic:'CC0', url:'https://kenney.nl/assets'},
+  oga:   {by:'OpenGameArt', lic:'', url:'https://opengameart.org/content/'}
+};
+// хелперы описания кандидата
+const K = (nm,note,extra={}) => Object.assign({nm,note,by:'Kenney',lic:'CC0',
+  url:'https://kenney.nl/assets'},extra);
+const O = (nm,note,slug,by,lic,extra={}) => Object.assign({nm,note,by,lic,
+  url:'https://opengameart.org/content/'+slug},extra);
+
+/* ================= ГРУППЫ ================= */
+const GROUPS = [
+{id:'shift', t:'Переход в параллельный мир', when:'вошёл в дверь, ось крутанулась',
+ dir:'sfx', tint:true,
+ why:'Самое крупное событие игры. Должно глушить всё остальное на ~300 мс и иметь три фазы: '+
+     'набор энергии → удар в момент подмены мира → хвост, на котором игрок уже видит новую геометрию. '+
+     'Первые три варианта собраны мной из слоёв Kenney именно по этой схеме, четвёртый-шестой — сток целиком.',
+ items:[
+  ['shift__machine', K('Машина','сборка: гул силового поля → низкий удар → механический хвост. Читается как «девайс сработал»',{made:1})],
+  ['shift__crystal', K('Кристалл','сборка: восходящий трезвучный тон → тяжёлый колокол с эхом. Читается как «реальность звякнула»',{made:1})],
+  ['shift__breath',  K('Выдох','сборка: реверс-нарастание → мягкий хлопок → шумовой хвост. Самый «мягкий», не бьёт по ушам при частых переходах',{made:1})],
+  ['shift__stock-field', K('Силовое поле','сток целиком, короткий (1 с). Плюс: не тормозит темп. Минус: мелковат для главного события')],
+  ['shift__stock-warp',  O('Варп','магический, с «завихрением». Тёплый, но менее машинный','spell-sounds-starter-pack','p0ss','CC-BY-SA 3.0')],
+  ['shift__stock-teleport', O('Телепорт','классический телепорт, узнаваемый до банальности','spell-sounds-starter-pack','p0ss','CC-BY-SA 3.0')],
+ ]},
+
+{id:'axis', t:'Оттенки осей — один звук, девять вариантов', when:'демонстрация принципа, не отбор',
+ dir:'sfx', nodecide:true,
+ why:'Это ОДИН файл «Машина» сверху, прогнанный через обработку каждой оси. Отдельных ассетов не делалось. '+
+     'Если схема заходит — так же получаем все 27 миров. Слушай подряд, разница должна читаться с закрытыми глазами.',
+ items:[
+  ['axis__temp-frost',  K('ТЕМП: мороз','выше, тоньше, срезан низ — стеклянно')],
+  ['axis__temp-heat',   K('ТЕМП: жара','ниже, гуще, подгрызен верх — вязко')],
+  ['axis__era-past',    K('ЭПОХА: прошлое','придушен верх + плавающая подкрутка — «старая запись»')],
+  ['axis__era-future',  K('ЭПОХА: будущее','большой хвост-эхо, разреженно — «пустой зал»')],
+  ['axis__plants-decay',K('РАСТ: тлен','узкая полоса, сухо, без низа и без верха')],
+  ['axis__plants-lush', K('РАСТ: буйство','расслоение/хорус + низ — «живое»')],
+ ]},
+
+{id:'step', t:'Шаги', when:'каждый шаг персонажа',
+ dir:'sfx',
+ why:'Слушай не один шаг, а ритм: в каждом файле 6 шагов подряд в темпе ходьбы — именно так '+
+     'слышно, «пулемёт» это или живая походка. В игре берём набор из 5 вариаций и играем по кругу со сдвигом высоты ±5%. '+
+     'Первые четыре — одно и то же семейство (Kenney), разные поверхности: важно, чтобы поверхности '+
+     'отличались, но звучали как один и тот же человек в одних и тех же ботинках.',
+ items:[
+  ['step__stone',   K('Камень / бетон','базовая поверхность цеха — по ней ходят 80% времени')],
+  ['step__ice',     K('Лёд / снег','мороз: вода стала полом, ходим поверху')],
+  ['step__grass',   K('Трава / полог','буйство: идём по сплошной растительной массе')],
+  ['step__wood',    K('Дерево / мостки','деревянные мостки, которые в тлене сгнивают')],
+  ['step__leather', K('Кожа / лёгкий','альтернативное семейство — легче и тише, если тяжёлый шаг мешает')],
+  ['step__snow-oga',O('Снег (хруст)','альтернатива для мороза, более хрустящая','4-dry-snow-steps','qubodup','CC0')],
+  ['step__leaves-oga',O('Сухая листва','альтернатива для тлена — шуршание вместо шага','20-rustles-dry-leaves','qubodup','CC0')],
+ ]},
+
+{id:'jump', t:'Прыжок', when:'нажал прыжок',
+ dir:'sfx',
+ why:'Короткий, без хвоста, без мелодии. Играется вплотную к шагу — не должен с ним драться '+
+     'по частотам. Восходящий по высоте (правило «вверх = движение вверх»).',
+ items:[
+  ['jump__phaser',  K('Фазер','синтетический свип вверх. Технологично, в тему девайса')],
+  ['jump__pluck',   K('Щипок','очень короткий музыкальный щипок. Самый ненавязчивый')],
+  ['jump__pep',     K('Пеп','мультяшный блип. Бодро, но может надоесть за 5 минут')],
+  ['jump__cloth',   K('Ткань','шорох одежды — реалистично, «человек оттолкнулся», не привлекает внимания')],
+  ['jump__maximize',K('Раскрытие','мягкий восходящий интерфейсный. Компромисс между музыкой и шумом')],
+ ]},
+
+{id:'land', t:'Приземление', when:'коснулся земли после прыжка/падения',
+ dir:'sfx',
+ why:'Нужен обязательно: без него прыжок «повисает». Тише прыжка, глуше, ниже по тону.',
+ items:[
+  ['land__soft', K('Мягко','приглушённый удар, почти не слышно — для частых прыжков')],
+  ['land__plate',K('Плита','металлический отзвук цеха')],
+  ['land__boot', K('Ботинок','тот же шаг, но ниже и тяжелее — идеально сходится со звуком ходьбы')],
+ ]},
+
+{id:'core', t:'Найдено ядро девайса', when:'подобрал термо/био/хроноядро (3 раза за игру)',
+ dir:'sfx',
+ why:'Главная награда. Должен быть музыкальным и мажорным — единственный момент, когда звук '+
+     'разрешает себе быть громким. Хорошо, если у трёх ядер это один и тот же джингл, '+
+     'транспонированный на ступень выше с каждым: игрок на слух считает прогресс 1→2→3.',
+ items:[
+  ['core__steel',        K('Сталь','металлический тембр — рифмуется с «деталь машины». Мой фаворит по смыслу')],
+  ['core__hit',          K('Удар','короткий, ударный, без длинного хвоста — не тормозит игру')],
+  ['core__nes',          K('8-бит','ретро-фанфара. Читается мгновенно, но тянет игру в пиксель-эстетику')],
+  ['core__sax',          K('Сакс','живой духовой — тепло, но выбивается из машинного мира')],
+  ['core__powerup-steel',K('Пауэрап + сталь','сборка: синтетический подъём → стальная фанфара. Двухфазно: «взял» + «засчитано»',{made:1})],
+ ]},
+
+{id:'toy', t:'Найдена игрушка / след ребёнка', when:'подобрал улику (поезд, рисунок, следы)',
+ dir:'sfx',
+ why:'Смысловой антипод ядру. Ядро — машина, игрушка — ребёнок. Значит НЕ синтетика: '+
+     'живой инструмент, шкатулка, стекло. Тише ядра, короче, теплее. Это единственный '+
+     '«человеческий» звук в игре — на нём держится вся эмоция поиска.',
+ items:[
+  ['toy__pizzicato', K('Пиццикато','щипковые струнные — детское, живое, светлое. Лучше всего ложится по смыслу')],
+  ['toy__pizzicato2',K('Пиццикато, длинное','то же, но фраза длиннее — если хочется, чтобы момент подышал')],
+  ['toy__glass',     K('Стекло','хрупкий стеклянный звон — «хрупкая память». Очень короткий')],
+  ['toy__bell',      K('Колокольчик','высокий колокольчик, ближе всего к музыкальной шкатулке')],
+  ['toy__confirm',   K('Подтверждение','нейтральный интерфейсный. Безопасно, но эмоционально пусто')],
+  ['toy__pep',       K('Пеп','мультяшно. Может считаться как «собрал монетку», а не «нашёл след сына»')],
+ ]},
+
+{id:'dial', t:'Дверь: крутим ось ±1', when:'стоишь на двери, жмёшь вверх/вниз',
+ dir:'sfx',
+ why:'Дверь работает как лифт-переключатель. Нужен тактильный щелчок-фиксатор, как у тумблера: '+
+     'короткий, механический, без тона. Это подготовка к переходу — сам переход звучит крупно, '+
+     'а щелчок должен быть мелким, иначе события сольются.',
+ items:[
+  ['dial__switch',K('Тумблер','пластиковый переключатель')],
+  ['dial__metal', K('Металл','металлический щелчок — ближе к «деталь машины»')],
+  ['dial__toggle',K('Тоггл','мягче, глуше')],
+  ['dial__tick',  K('Тик','минимально возможный. Если крутить ось часто — самый безопасный')],
+ ]},
+
+{id:'door', t:'Дверь открывается / вход', when:'дверь сработала, входим',
+ dir:'sfx',
+ why:'Отделяет «дверь приняла» от самого перехода. Может и не понадобиться, если переход '+
+     'достаточно выразительный — тогда всю группу в ✗.',
+ items:[
+  ['door__scifi',    K('Sci-fi','шлюз, пневматика — в тему космического цеха')],
+  ['door__rpg',      K('Обычная дверь','скрип, дерево — если цех «старый завод», а не «космос»')],
+  ['door__interface',K('Интерфейсная','абстрактное «открылось», без материала')],
+ ]},
+
+{id:'plants', t:'Растения: пружина и лазанье', when:'отскок от сухой лианы, подъём по лестнице',
+ dir:'sfx',
+ why:'По механике жара делает лиану пружиной (отскок далеко), норма — лестницей (лезешь вверх). '+
+     'Пружина — самое «сочное» из движений, ей можно дать выразительный звук.',
+ items:[
+  ['bounce__spring',O('Пружина','настоящая пружина. Читается однозначно','spell-sounds-starter-pack','p0ss','CC-BY-SA 3.0')],
+  ['bounce__pep',   K('Пеп-отскок','синтетический, бодрый')],
+  ['bounce__soft',  K('Мягкий батут','приглушённый — для сплошного «батут-поля», где отскоки частые')],
+  ['climb__cloth',  K('Лазанье','шорох ткани/листьев на каждой ступени подъёма')],
+ ]},
+
+{id:'env', t:'Среда: гейзер, вода, лёд', when:'гейзер подбрасывает, вход в воду, заморозка',
+ dir:'sfx',
+ why:'Гейзер по температуре: мороз — застыл опорой, норма — тёплый воздух насквозь, жара — подбрасывает. '+
+     'Вода: норма — плывёшь, мороз — лёд, жара — испарилась.',
+ items:[
+  ['geyser__steam',   O('Гейзер: пар','настоящий выпуск пара','steam-release-sounds','bart','CC0')],
+  ['geyser__thruster',K('Гейзер: тяга','ровная струя-двигатель, более технологично')],
+  ['water__splash',   O('Вода: всплеск','вход в воду','40-cc0-water-splash-slime-sfx','rubberduck','CC0')],
+  ['water__splash2',  O('Вода: всплеск 2','крупнее','40-cc0-water-splash-slime-sfx','rubberduck','CC0')],
+  ['water__swim-loop',O('Вода: плаваем (луп)','подкладывается, пока плывёшь','40-cc0-water-splash-slime-sfx','rubberduck','CC0')],
+  ['ice__freeze',     O('Заморозка','вода становится льдом — сопровождает смену температуры','spell-sounds-starter-pack','p0ss','CC-BY-SA 3.0')],
+ ]},
+
+{id:'denial', t:'Заперто / сюда нельзя', when:'дверь без нужного ядра, непроходимый камень',
+ dir:'sfx',
+ why:'ВАЖНО: в игре нет смертей и наказаний. Это должно звучать как «закрыто», а не как «ошибка». '+
+     'Глухо, коротко, без резкого верха. Если звук раздражает со второго раза — он не подходит.',
+ items:[
+  ['denial__thud',    K('Глухой удар','дерево/камень. Максимально «безобидный» отказ. Рекомендую')],
+  ['denial__bong',    K('Бонг','низкий тон вниз — «не сейчас»')],
+  ['denial__question',K('Вопрос','вопросительная интонация — «не хватает части»')],
+  ['denial__error',   K('Ошибка','классический отказ. Рискует читаться как наказание')],
+ ]},
+
+{id:'final', t:'Финал: ребёнок найден', when:'последняя дверь, встреча',
+ dir:'sfx',
+ why:'Кульминация. Длиннее всех остальных, можно 2–3 секунды. По-хорошему это тот же тембр, '+
+     'что у игрушек (пиццикато) — тогда финал звучит как разрешение темы, которую игрок слышал всю игру.',
+ items:[
+  ['final__pizzicato',K('Пиццикато-финал','рифмуется с игрушками — самый связный вариант')],
+  ['final__steel',    K('Сталь-финал','рифмуется с ядрами — «машина починена»')],
+  ['final__sax',      K('Сакс-финал','тепло, по-человечески')],
+ ]},
+
+{id:'ui', t:'Интерфейс', when:'карта миров (TAB), рестарт, меню',
+ dir:'sfx',
+ why:'Тише всего остального. Играется поверх геймплея — не должен спорить с игровыми звуками.',
+ items:[
+  ['ui__click',    K('Клик','нажатие')],
+  ['ui__map-open', K('Карта: открыть','разворачивание')],
+  ['ui__map-close',K('Карта: закрыть','сворачивание')],
+ ]},
+
+/* ---------- МУЗЫКА ---------- */
+{id:'bed', t:'МУЗЫКА · Основная тема', when:'играет всегда, во всех 27 мирах', dir:'music', mix:'bed',
+ why:'Эмоциональная нить: отец ищет ребёнка. Играет непрерывно, поверх неё работают все оси. '+
+     'Требования: спокойная, зацикливаемая, без выраженной мелодии-крючка (заест за 5 минут), '+
+     'не мажорная и не страшная — «сосредоточенный поиск».',
+ items:[
+  ['bed__atmospheric-puzzles',O('Atmospheric puzzles','ровный пульс, головоломочный. Не мешает думать','atmospheric-puzzles','qubodup','CC0')],
+  ['bed__contemplation',      O('Contemplation','созерцательная, тёплая. Больше эмоции, меньше «пазла»','contemplation-0','joth','CC0')],
+  ['bed__near-and-far',       O('Near and Far','название прямо про нас. Просторная','near-and-far','joth','CC0')],
+  ['bed__exploration',        O('Exploration Theme','исследовательская, чуть приключенческая','exploration-theme','cleytonkauffman','CC0')],
+  ['bed__balance',            O('Balance','нейтрально-медитативная','balance-0','loyalty-freak-music','CC0')],
+  ['bed__mysterious',         O('Mysterious Ambience','загадочная, почти эмбиент. Совсем не мешает','mysterious-ambience-song21','cynicmusic','CC0')],
+  ['bed__dungeon',            O('Dungeon Ambience','мрачнее, ближе к «заброшенный цех»','dungeon-ambience','yd','CC0')],
+ ]},
+
+{id:'cold', t:'МУЗЫКА · Мороз', when:'ТЕМПЕРАТУРА = мороз (подменяет основную тему)', dir:'music', mix:'cold',
+ why:'Должна отличаться от основной по тембру, но не по темпу — иначе переключение оси '+
+     'ощущается как «другая игра», а не «другой слой той же игры». Ищем стекло, звон, высокие, разреженность.',
+ items:[
+  ['cold__frozen-veil', O('Beyond the Frozen Veil','холодная и просторная, без мелодраматизма','beyond-the-frozen-veil','synth-thetic','CC0')],
+  ['cold__black-diamond',O('Black Diamond','кристаллическая, острая','black-diamond','joth','CC0')],
+  ['cold__icy-realm',   O('Icy Realm','ледяная, с движением','icy-realm-seven-and-eight','cynicmusic','CC0')],
+  ['cold__ice-cavern',  O('The Ice Cavern','пещерная, гулкая','the-ice-cavern','peastman','CC-BY 3.0')],
+  ['cold__0k',          O('0 K','абсолютный ноль — самая «пустая»','0-k','terrazon','CC-BY 3.0')],
+  ['cold__cold-lake',   O('Cold Lake','холодная, но мелодичная','cold-lake','tad','CC-BY 4.0')],
+ ]},
+
+{id:'heat', t:'МУЗЫКА · Жара', when:'ТЕМПЕРАТУРА = жара (подменяет основную тему)', dir:'music', mix:'heat',
+ why:'Симметрично морозу, но в другую сторону: низ, плотность, гул, ощущение давления. '+
+     'Осторожно с «боевой» динамикой — у нас нет угрозы и нет смертей, жара это среда, а не опасность.',
+ items:[
+  ['heat__fire-level',    O('Fire Level','прямое попадание по теме','fire-level','spring-spring','CC0')],
+  ['heat__iron-wasteland',O('Iron Wasteland','железо и жар, индустриально','iron-wasteland','alexandr-zhelanov','CC-BY 4.0')],
+  ['heat__among-machines',O('Among Machines','машинный гул — рифмуется с цехом','among-machines','snabisch','CC-BY 3.0')],
+  ['heat__core',          O('Core','название про ядро девайса, плотная','core','jdagenet','CC-BY-SA 3.0')],
+  ['heat__fire-maze',     O('Fire Maze','огненный лабиринт, подвижная','fire-maze','jadewizard','CC-BY 4.0')],
+  ['heat__tower-of-lava', O('Tower of Lava','драматичная, самая «большая»','tower-of-lava','mega-pixel-music-lab','CC-BY 3.0')],
+ ]},
+
+{id:'decay', t:'МУЗЫКА · Слой тлена', when:'РАСТИТЕЛЬНОСТЬ = тлен (подкладывается поверх)', dir:'music', mix:'decay',
+ why:'Не музыка, а атмосферный слой поверх текущего трека. Должен быть почти без событий: '+
+     'сухой ветер, пустота, редкая капля. Задача — сделать мир «мёртвым», не перебивая музыку.',
+ items:[
+  ['decay__space-winds', O('Space Winds','чистый ветер, ноль мелодии. Идеально как слой','space-winds','aquinn','CC0')],
+  ['decay__post-apoc',   O('Post Apocalyptic','пустошь, безжизненно','horror-atmosphere','subspaceaudio','CC0')],
+  ['decay__dripping',    O('Капель','капли в пустоте — очень скупо','dripping-water-loop','qubodup','CC0')],
+  ['decay__dungeon-amb', O('Подземелье','гулкая пустая комната','loopable-dungeon-ambience','jaggedstone','CC0')],
+  ['decay__pa-wasteland',O('PA Wasteland','пустошь с музыкальным движением — заметнее','nice-place-in-pa-wastland','alexandr-zhelanov','CC-BY 4.0')],
+ ]},
+
+{id:'lush', t:'МУЗЫКА · Слой буйства', when:'РАСТИТЕЛЬНОСТЬ = буйство (подкладывается поверх)', dir:'music', mix:'lush',
+ why:'Зеркало тлена: живой шум поверх текущего трека. Листва, птицы, вода. Тоже без мелодии — '+
+     'иначе подерётся с основной темой.',
+ items:[
+  ['lush__jc-nature',    O('Nature Ambient','листва и птицы, чистая природа','jc-sounds-nature-ambient-pack-vol-1','jc-sounds','CC-BY 4.0')],
+  ['lush__chill-jungle', O('Chill Jungle','джунгли, гуще','chill-jungle-ambient','tausdei','CC-BY 3.0')],
+  ['lush__forest',       O('Forest','лес, спокойнее','forest','syncopika','CC-BY 3.0')],
+  ['lush__creepy-forest',O('Creepy Forest','лес с тревогой — если буйство должно немного пугать','creepy-forest-f','haeldb','CC0')],
+  ['lush__appalachian',  O('Appalachian Sunrise','живая и светлая, но это уже музыка, а не слой','appalachian-sunrise','hencefox','CC-BY 3.0')],
+ ]},
+
+{id:'story', t:'МУЗЫКА · Вступление и финал', when:'комикс-вступление, встреча с ребёнком', dir:'music',
+ why:'Единственное место, где музыке можно быть откровенно эмоциональной. Играет два раза за игру: '+
+     'на комиксе (машина ломается, ребёнка утаскивает) и на финале.',
+ items:[
+  ['story__melancholy-piano',   O('Melancholy Piano','фортепиано, прямая эмоция потери','melancholy-piano-theme','moondanny','CC-BY 3.0')],
+  ['story__abandoned-metropolis',O('Abandoned Metropolis','масштабно и печально','abandoned-metropolis','tad','CC-BY 3.0')],
+  ['story__nimuehs-gift',       O('Nimueh\'s Gift','светлая, подходит финалу-воссоединению','medieval-fantasy-ambient-music-nimuehs-gift','elyvilon','CC-BY 4.0')],
+  ['story__aquaria',            O('Aquaria','нежная и странная','aquaria','cynicmusic','CC0')],
+  ['story__nature-sketch',      O('Nature Sketch','тёплый набросок','nature-theme-sketch','remaxim','CC-BY-SA 3.0')],
+ ]},
+];
+
+/* ================= СОСТОЯНИЕ ================= */
+const LS='paralleli-audio-review';
+let V = JSON.parse(localStorage.getItem(LS)||'{}');
+const save=()=>{localStorage.setItem(LS,JSON.stringify(V));updProg();};
+const fileOf=(g,id)=>`candidates/${g.dir}/${id}.mp3`;
+const licClass=l=>l==='CC0'?'cc0':/SA|GPL/.test(l)?'sa':'by';
+
+/* ================= ОТРИСОВКА ================= */
+function render(){
+  const root=document.getElementById('groups');
+  GROUPS.forEach(g=>{
+    const sec=document.createElement('section');
+    let rows='';
+    g.items.forEach(([id,c])=>{
+      const st=V[id]||'';
+      rows+=`<div class="row ${st}" id="row-${id}">
+        <button class="play" onclick="play('${fileOf(g,id)}','${id}')" id="pb-${id}">▶</button>
+        <div class="meta"><div class="nm">${c.nm}</div><div class="nt">${c.note}</div></div>
+        <div class="tags">
+          ${c.made?'<span class="tag mix">сборка</span>':''}
+          <span class="tag">${c.by}</span>
+          <a class="tag ${licClass(c.lic)}" href="${c.url}" target="_blank">${c.lic}</a>
+        </div>
+        ${g.nodecide?'':`<div class="vote">
+          <button class="a ${st==='yes'?'on':''}" onclick="vote('${id}','yes')" title="берём">✓</button>
+          <button class="r ${st==='no' ?'on':''}" onclick="vote('${id}','no')"  title="мимо">✗</button>
+        </div>`}
+      </div>`;
+    });
+    sec.innerHTML=`
+    <div class="stitle"><h2>${g.t}</h2><span class="cnt">${g.items.length} вариантов</span></div>
+    <div class="grp">
+      <div class="ghead">
+        <div class="gt"><h3>${g.t}</h3><span class="when">когда: ${g.when}</span></div>
+        <div class="why">${g.why}</div>
+      </div>
+      ${rows}
+      ${g.tint?`<div class="tintbar">
+        <b style="color:var(--fg)">оттенок оси на выбранном звуке:</b>
+        <button onclick="tint('t0')">мороз</button><button onclick="tint('t2')">жара</button>
+        <button onclick="tint('e0')">прошлое</button><button onclick="tint('e2')">будущее</button>
+        <button onclick="tint('p0')">тлен</button><button onclick="tint('p2')">буйство</button>
+        <button onclick="tint('')">без обработки</button>
+        <span id="tinthint">— сначала нажми ▶ на любом варианте выше</span>
+      </div>`:''}
+    </div>`;
+    root.appendChild(sec);
+  });
+  updProg(); renderCredits();
+}
+function vote(id,v){ V[id]=(V[id]===v?'':v); save();
+  const r=document.getElementById('row-'+id); r.className='row '+(V[id]||'');
+  r.querySelector('.vote .a').classList.toggle('on',V[id]==='yes');
+  r.querySelector('.vote .r').classList.toggle('on',V[id]==='no'); }
+function updProg(){
+  let tot=0,dec=0,yes=0;
+  GROUPS.forEach(g=>{ if(g.nodecide)return; g.items.forEach(([id])=>{tot++;
+    if(V[id])dec++; if(V[id]==='yes')yes++;});});
+  document.getElementById('prog').innerHTML=`решено <b>${dec}</b>/${tot} · взято <b>${yes}</b>`;
+}
+function clearAll(){ if(!confirm('Стереть все решения?'))return; V={}; save();
+  document.getElementById('groups').innerHTML=''; render(); }
+
+/* ================= ПРОСТОЕ ВОСПРОИЗВЕДЕНИЕ ================= */
+let cur=null, curId=null, curFile=null;
+document.getElementById('vol').oninput=e=>{ if(cur)cur.volume=+e.target.value; masterVol(+e.target.value); };
+function play(f,id){
+  if(cur){cur.pause(); const p=document.getElementById('pb-'+curId); if(p){p.textContent='▶';p.classList.remove('playing');}}
+  if(curId===id && curFile===f && cur && !cur.ended){ cur=null;curId=null;return; }
+  cur=new Audio(f); cur.volume=+document.getElementById('vol').value; cur.play();
+  curId=id; curFile=f;
+  const b=document.getElementById('pb-'+id); b.textContent='■'; b.classList.add('playing');
+  const h=document.getElementById('tinthint'); if(h)h.textContent='— выбран: '+id;
+  cur.onended=()=>{b.textContent='▶';b.classList.remove('playing');};
+}
+addEventListener('keydown',e=>{ if(e.code==='Space'&&curFile&&e.target===document.body){
+  e.preventDefault(); play(curFile,curId); }});
+
+/* ================= WEB AUDIO: ОТТЕНКИ ОСЕЙ ================= */
+const isFile = location.protocol==='file:';
+if(isFile) document.getElementById('filewarn').style.display='block';
+let AC=null, master=null;
+function ac(){ if(!AC){ AC=new (window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain(); master.gain.value=+document.getElementById('vol').value;
+  master.connect(AC.destination);} AC.resume(); return AC; }
+function masterVol(v){ if(master)master.gain.value=v; }
+function impulse(sec,decay){ const c=ac(),n=c.sampleRate*sec,b=c.createBuffer(2,n,c.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);
+    for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay);} return b; }
+const TINT={
+  t0:{rate:1.15,hp:350,lp:20000,hs:5,ls:0,wet:0},
+  t2:{rate:0.86,hp:20,  lp:3200, hs:-4,ls:6,wet:0},
+  e0:{rate:0.97,hp:20,  lp:1400, hs:-6,ls:2,wet:0},
+  e2:{rate:1.0, hp:20,  lp:20000,hs:4, ls:0,wet:.45},
+  p0:{rate:1.0, hp:180, lp:2600, hs:0, ls:-4,wet:0},
+  p2:{rate:0.99,hp:20,  lp:20000,hs:0, ls:4, wet:.15},
+  '': {rate:1,hp:20,lp:20000,hs:0,ls:0,wet:0}
+};
+function tint(k){
+  if(!curFile){alert('Сначала нажми ▶ на одном из вариантов перехода.');return;}
+  if(isFile){alert('Живые оттенки требуют локального сервера — см. жёлтую плашку сверху.');return;}
+  const c=ac(),T=TINT[k]||TINT[''];
+  const el=new Audio(curFile); el.crossOrigin='anonymous';
+  const s=c.createMediaElementSource(el);
+  const hp=c.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=T.hp;
+  const lp=c.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=T.lp;
+  const hs=c.createBiquadFilter(); hs.type='highshelf';hs.frequency.value=3000; hs.gain.value=T.hs;
+  const ls=c.createBiquadFilter(); ls.type='lowshelf'; ls.frequency.value=250;  ls.gain.value=T.ls;
+  const dry=c.createGain(); dry.gain.value=1-T.wet*0.5;
+  const wet=c.createGain(); wet.gain.value=T.wet;
+  const cv=c.createConvolver(); cv.buffer=impulse(2.2,3);
+  s.connect(hp);hp.connect(lp);lp.connect(hs);hs.connect(ls);
+  ls.connect(dry);dry.connect(master); ls.connect(cv);cv.connect(wet);wet.connect(master);
+  el.playbackRate=T.rate; el.play();
+  const names={t0:'мороз',t2:'жара',e0:'прошлое',e2:'будущее',p0:'тлен',p2:'буйство','':'без обработки'};
+  document.getElementById('tinthint').textContent='— '+curId+' · '+names[k];
+}
+
+/* ================= МИКШЕР МИРА ================= */
+const AXV={t:['мороз','норма','жара'],e:['прошлое','настоящее','будущее'],p:['тлен','норма','буйство']};
+let AX={t:1,e:1,p:1};
+['t','e','p'].forEach(a=>{
+  document.getElementById('ax-'+a).innerHTML=AXV[a].map((v,i)=>
+    `<button data-v="${i}" class="${i===1?'on':''}" onclick="setAx('${a}',${i})">${v}</button>`).join('');
+});
+function setAx(a,i){ AX[a]=i;
+  [...document.getElementById('ax-'+a).children].forEach((b,j)=>b.classList.toggle('on',j===i));
+  applyMix(); }
+
+// какой файл взят в группе mix-роли: первый ✓, иначе первый в списке
+function pickFor(role){ const g=GROUPS.find(x=>x.mix===role); if(!g)return null;
+  const y=g.items.find(([id])=>V[id]==='yes'); const [id,c]=(y||g.items[0]);
+  return {id,file:fileOf(g,id),nm:c.nm}; }
+
+let MIX=null;
+function buildMix(){
+  const c=ac(); const roles=['bed','cold','heat','decay','lush']; const L={};
+  const eraLP=c.createBiquadFilter(); eraLP.type='lowpass'; eraLP.frequency.value=20000;
+  const eraHS=c.createBiquadFilter(); eraHS.type='highshelf'; eraHS.frequency.value=3000; eraHS.gain.value=0;
+  const dry=c.createGain(); const wet=c.createGain(); wet.gain.value=0;
+  const cv=c.createConvolver(); cv.buffer=impulse(3.2,2.4);
+  eraLP.connect(eraHS); eraHS.connect(dry); dry.connect(master);
+  eraHS.connect(cv); cv.connect(wet); wet.connect(master);
+  roles.forEach(r=>{ const p=pickFor(r); if(!p)return;
+    const el=new Audio(p.file); el.loop=true; el.crossOrigin='anonymous';
+    const src=c.createMediaElementSource(el); const g=c.createGain(); g.gain.value=0;
+    src.connect(g); g.connect(eraLP); L[r]={el,g,nm:p.nm};});
+  MIX={L,eraLP,eraHS,wet,dry,on:false};
+}
+function toggleMix(){
+  if(isFile){alert('Микшер требует локального сервера — см. жёлтую плашку сверху.');return;}
+  if(!MIX)buildMix();
+  const b=document.getElementById('mixbtn');
+  if(MIX.on){ Object.values(MIX.L).forEach(x=>x.el.pause()); MIX.on=false;
+    b.textContent='▶ запустить микшер'; b.classList.add('pri');
+    document.getElementById('mixnow').textContent='остановлен'; return; }
+  if(cur)cur.pause();
+  Object.values(MIX.L).forEach(x=>{x.el.currentTime=0;x.el.play().catch(()=>{});});
+  MIX.on=true; b.textContent='■ стоп'; b.classList.remove('pri'); applyMix();
+}
+function reloadMix(){ if(MIX){Object.values(MIX.L).forEach(x=>x.el.pause());} MIX=null;
+  document.getElementById('mixnow').textContent='треки перечитаны — жми «запустить микшер»'; }
+function applyMix(){
+  if(!MIX||!MIX.on){ describeMix(); return; }
+  const c=ac(),T=.7,now=c.currentTime,set=(n,v)=>n.gain.setTargetAtTime(v,now,T);
+  const L=MIX.L;
+  // ТЕМПЕРАТУРА: подмена основного трека, основа остаётся тонким клеем
+  if(L.bed) set(L.bed.g, AX.t===1?0.85:0.18);
+  if(L.cold)set(L.cold.g,AX.t===0?0.80:0);
+  if(L.heat)set(L.heat.g,AX.t===2?0.80:0);
+  // РАСТИТЕЛЬНОСТЬ: слой атмосферы
+  if(L.decay)set(L.decay.g,AX.p===0?0.55:0);
+  if(L.lush) set(L.lush.g, AX.p===2?0.50:0);
+  // ЭПОХА: обработка всей шины
+  const era=[{lp:1400,hs:-7,wet:0.0,rate:0.985},{lp:20000,hs:0,wet:0.0,rate:1},
+             {lp:20000,hs:4, wet:0.40,rate:1}][AX.e];
+  MIX.eraLP.frequency.setTargetAtTime(era.lp,now,T);
+  MIX.eraHS.gain.setTargetAtTime(era.hs,now,T);
+  MIX.wet.gain.setTargetAtTime(era.wet,now,T);
+  MIX.dry.gain.setTargetAtTime(1-era.wet*0.45,now,T);
+  Object.values(L).forEach(x=>x.el.playbackRate=era.rate);
+  describeMix();
+}
+function describeMix(){
+  const L=MIX?MIX.L:null;
+  const lay=[];
+  if(AX.t===1) lay.push('основная тема'+(L&&L.bed?' · '+L.bed.nm:''));
+  if(AX.t===0) lay.push('трек мороза'+(L&&L.cold?' · '+L.cold.nm:''));
+  if(AX.t===2) lay.push('трек жары'+(L&&L.heat?' · '+L.heat.nm:''));
+  if(AX.p===0) lay.push('слой тлена'+(L&&L.decay?' · '+L.decay.nm:''));
+  if(AX.p===2) lay.push('слой буйства'+(L&&L.lush?' · '+L.lush.nm:''));
+  const eraTxt=['фильтр «старая запись»','без обработки','реверб «пустой зал»'][AX.e];
+  const n=1+AX.t*9+AX.e*3+AX.p;
+  document.getElementById('mixnow').innerHTML=
+    `<b>${AXV.t[AX.t]} · ${AXV.e[AX.e]} · ${AXV.p[AX.p]}</b> — мир ${n} из 27<br>`+
+    lay.map(x=>`<span class="lay">${x}</span>`).join('')+
+    `<span class="lay">эпоха: ${eraTxt}</span>`+
+    `<br><span style="color:var(--dim2)">звучит ${lay.length} слоя из 5 файлов · отдельных тем на этот мир не существует</span>`;
+}
+describeMix();
+
+/* ================= ССЫЛКА С ВЫБОРОМ ================= */
+// голоса пакуются в порядке GROUPS: '.'=не слушал, 'y'=взял, 'n'=мимо
+function allIds(){ const a=[]; GROUPS.forEach(g=>g.items.forEach(([id])=>a.push(id))); return a; }
+function encodeVotes(){
+  const s=allIds().map(id=>V[id]==='yes'?'y':V[id]==='no'?'n':'.').join('');
+  return btoa(s).replace(/=+$/,'');
+}
+function decodeVotes(b64){
+  try{ const s=atob(b64); const ids=allIds(); if(s.length!==ids.length) return null;
+    const o={}; ids.forEach((id,i)=>{ const c=s[i];
+      if(c==='y')o[id]='yes'; else if(c==='n')o[id]='no'; }); return o;
+  }catch(e){ return null; }
+}
+function shareLink(){
+  const who=(prompt('Твоё имя (попадёт в ссылку, чтобы я понимал чей это выбор):','')||'').trim();
+  const url=location.origin+location.pathname+'#v='+encodeVotes()+(who?'&by='+encodeURIComponent(who):'');
+  navigator.clipboard.writeText(url).then(()=>alert('Ссылка скопирована — кидай её в чат.\n\n'+url),
+    ()=>prompt('Скопируй ссылку вручную:',url));
+}
+// при загрузке: если в адресе чужой выбор — предложить посмотреть
+(function loadFromHash(){
+  const m=location.hash.match(/[#&]v=([A-Za-z0-9+/]+)/); if(!m) return;
+  const by=(location.hash.match(/[#&]by=([^&]*)/)||[])[1];
+  const got=decodeVotes(m[1]); if(!got) return;
+  const name=by?decodeURIComponent(by):'кто-то из команды';
+  const has=Object.keys(V).length;
+  const msg=`В ссылке лежит выбор: ${name}.\n\n`+
+    (has?`У тебя уже есть свои отметки (${has}). Загрузить чужие ПОВЕРХ своих?`
+        :`Загрузить его?`);
+  if(confirm(msg)){ V=got; localStorage.setItem(LS,JSON.stringify(V)); }
+})();
+
+/* ================= ЭКСПОРТ ================= */
+function showExport(){
+  let out='# Paralleli — отбор звука\n\n';
+  const need=[];
+  GROUPS.forEach(g=>{
+    if(g.nodecide)return;
+    const yes=g.items.filter(([id])=>V[id]==='yes');
+    const no =g.items.filter(([id])=>V[id]==='no');
+    const un =g.items.filter(([id])=>!V[id]);
+    out+=`## ${g.t}\n`;
+    if(yes.length){ out+=`ВЗЯТО: ${yes.map(([id,c])=>`${c.nm} (${id}) [${c.lic}]`).join(' | ')}\n`; }
+    else { out+='ВЗЯТО: — ничего не выбрано\n'; need.push(g.t); }
+    if(no.length) out+=`отклонено: ${no.map(([id,c])=>c.nm).join(', ')}\n`;
+    if(un.length) out+=`не слушал: ${un.map(([id,c])=>c.nm).join(', ')}\n`;
+    out+='\n';
+  });
+  if(need.length) out+=`\n# ГРУППЫ БЕЗ ВЫБОРА (нужны новые кандидаты)\n- `+need.join('\n- ')+'\n';
+  out+='\n# JSON\n'+JSON.stringify(V);
+  document.getElementById('exptext').value=out;
+  document.getElementById('exp').classList.add('on');
+}
+function copyExport(){ const t=document.getElementById('exptext'); t.select();
+  navigator.clipboard.writeText(t.value).then(()=>{
+    document.getElementById('copied').textContent='скопировано';
+    setTimeout(()=>document.getElementById('copied').textContent='',1800);}); }
+
+/* ================= КРЕДИТЫ ================= */
+function renderCredits(){
+  const m={};
+  GROUPS.forEach(g=>g.items.forEach(([id,c])=>{ m[c.by+'|'+c.lic+'|'+c.url]=1; }));
+  document.getElementById('credits').innerHTML=
+   '<b>Лицензии.</b> CC0 — можно всё, указывать авторство не обязательно. '+
+   'CC-BY — обязателен кредит в титрах. CC-BY-SA / GPL — кредит + вирусная лицензия, '+
+   'для джема годится, для коммерции лучше заменить. Кандидаты с такой пометкой отмечены красным.<br><br>'+
+   '<b>Источники:</b> '+Object.keys(m).map(k=>{const[by,lic,url]=k.split('|');
+     return `<a href="${url}" target="_blank">${by}</a> (${lic})`;}).join(' · ');
+}
+render();
+</script>
+</body>
+</html>
