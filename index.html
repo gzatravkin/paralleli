@@ -1,0 +1,1819 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ПАРАЛЛЕЛИ · без возврата</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#05060b;color:#cdd2e0;font:13px/1.45 "Segoe UI",system-ui,sans-serif;
+       display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px}
+  h1{font-size:12px;margin:0;letter-spacing:.24em;text-transform:uppercase;color:#5c6383;font-weight:600}
+  canvas{display:block;border:1px solid #1b1f2c;border-radius:6px;background:#05060b;
+         box-shadow:0 0 40px rgba(0,0,0,.8) inset}
+  #audit{width:1000px;border:1px solid #222738;border-radius:5px;background:#0a0d15;padding:10px 13px;
+         font-size:11.5px;color:#79819e;white-space:pre-wrap;font-family:"Consolas",monospace}
+  #audit b{color:#d7dcea}
+  #audit .ok{color:#67c98a}
+  #audit .bad{color:#e2645f}
+  #audit .w{color:#d9a65a}
+  #keys{font-size:11px;color:#565d78;display:flex;gap:14px;justify-content:center;width:1000px;flex-wrap:wrap}
+  .k{border:1px solid #2c3245;border-radius:3px;padding:0 5px;background:#131826;color:#8a92ae}
+</style>
+</head>
+<body>
+<h1>Параллели · версия Б · вернуться той же дверью нельзя</h1>
+<canvas id="cv" width="1000" height="600"></canvas>
+<div id="audit">аудит: считаю…</div>
+<div id="keys">
+  <span><span class="k">A</span><span class="k">D</span> идти</span>
+  <span><span class="k">W</span>/<span class="k">Пробел</span> прыжок</span>
+  <span><span class="k">W</span><span class="k">S</span> по лианам</span>
+  <span><span class="k">E</span> войти в дверь</span>
+  <span><span class="k">R</span> заново</span>
+  <span><span class="k">TAB</span> карта миров</span>
+</div>
+
+<script>
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПАРАЛЛЕЛИ · БЕЗ ВОЗВРАТА
+
+   Одна карта — девять её версий. Две оси:
+     ТЕМПЕРАТУРА  МОРОЗ(0) ← НОРМА(1) → ЖАРА(2)
+     УВЯДАНИЕ     ТЛЕН(0)  ← НОРМА(1) → БУЙСТВО(2)
+
+   Двери существуют не во всех версиях мира. Дверь, которой ты прошёл,
+   в мире-назначении отсутствует по построению: у двери есть значение
+   СВОЕЙ оси, при котором она существует, а шаг всегда уводит с него.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const W = 64, H = 26, T = 52;          // карта в клетках, размер тайла
+const VIEW_W = 1000, VIEW_H = 600;
+
+/* ── версии мира: три оси по три значения = 27 версий ──────────────────── */
+const NW = 27;
+const TEMP_NAMES = ['МОРОЗ', 'НОРМА', 'ЖАРА'];
+const WILT_NAMES = ['ТЛЕН', 'НОРМА', 'БУЙСТВО'];
+const ERA_NAMES  = ['ПРОШЛОЕ', 'НАСТОЯЩЕЕ', 'БУДУЩЕЕ'];
+const AXIS_NAMES = ['ТЕМПЕРАТУРА', 'УВЯДАНИЕ', 'ЭПОХА'];
+const AXIS_VALS  = [TEMP_NAMES, WILT_NAMES, ERA_NAMES];
+const widx = (t, d, e) => (t * 3 + d) * 3 + e;
+const wtemp = w => (w / 9) | 0;
+const wwilt = w => ((w / 3) | 0) % 3;
+const wera  = w => w % 3;
+const waxis = (w, a) => a === 0 ? wtemp(w) : a === 1 ? wwilt(w) : wera(w);
+const W_ADJ  = ['ЗАМЁРЗШИЕ', 'ТИХИЕ', 'РАСКАЛЁННЫЕ'];
+const W_NOUN = ['РУИНЫ', 'ЗАЛЫ', 'ЗАРОСЛИ'];
+const W_ERA  = [' ПРОШЛОГО', '', ' БУДУЩЕГО'];
+const worldName = w => W_ADJ[wtemp(w)] + ' ' + W_NOUN[wwilt(w)] + W_ERA[wera(w)];
+const worldShort = w => TEMP_NAMES[wtemp(w)] + ' · ' + WILT_NAMES[wwilt(w)] + ' · ' + ERA_NAMES[wera(w)];
+const START_WORLD = widx(1, 1, 1);
+
+/* ── карта ─────────────────────────────────────────────────────────────── */
+const map = [];
+for (let y = 0; y < H; y++) map.push(new Array(W).fill('#'));
+function box(x0, y0, x1, y1, ch) {
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
+    if (x >= 0 && x < W && y >= 0 && y < H) map[y][x] = ch;
+}
+
+/*  '#' камень   '.' пустота
+    'w' вода     — мороз: лёд (мост) · норма: топит · жара: испарилась
+    'l' лава     — мороз: застыла камнем · иначе смерть
+    'm' мостки   — сгорают в жаре, гниют в тлене
+    'x' ледяная глыба — ступень; в жаре тает (провал)
+    's' снежный нанос — ступень только в мороз
+    'v' лианы    — лестница только в буйстве
+    'n' заросли  — платформа только в буйстве
+    't' поросль в проёме — стена, исчезает только в тлене
+    'a' ветхая кладка    — стена, рассыпается только в тлене
+    ── ось ЭПОХИ меняет саму архитектуру ──
+    'p' целое перекрытие/стена — есть ТОЛЬКО в прошлом: закрывает проход, но даёт опору
+    'f' ветхое перекрытие/стена — есть везде, КРОМЕ будущего: в будущем обрушилось
+    'r' обвал, куча обломков   — есть ТОЛЬКО в будущем: по ней можно забраться   */
+
+box(44,  4, 62,  7, '.');   // ВЕРХНИЙ зал (пол — плита y=8)
+box(10,  9, 62, 14, '.');   // СРЕДНИЙ зал (пол — плита y=15)
+box( 1, 16, 50, 21, '.');   // НИЖНИЙ зал  (пол — плита y=22)
+
+box(48, 15, 50, 15, '.');   // дыры в средней плите (спуск в зал C)
+box(56,  8, 58,  8, '.');   // дыры в верхней плите (спуск в средний зал)
+
+box(13, 14, 13, 21, 'v');   // лианы: нижний зал A → средний (запад)
+box(44,  7, 44, 14, 'v');   // лианы: верхний зал → средний (восток)
+
+box(31, 11, 32, 12, '#');   // перегородка среднего зала…
+box(31, 13, 32, 14, 'a');   // …внизу ветхая кладка (проход в тлене)
+box(31,  9, 32, 10, 'f');   // …вверху ветхая — в будущем обвалилась
+box(30, 12, 30, 13, 'r');   // обломки у стены (только в будущем) — по ним наверх
+
+box(17, 14, 23, 15, 'w');   // разлив на среднем ярусе (7 клеток)
+box(16,  9, 16, 14, '#');   // западный карман отрезан: туда только по лианам
+
+box(25, 15, 27, 15, '.');   // колодец из среднего в нижний зал
+box(25, 18, 27, 18, 'x');   // ледяная глыба в колодце — ступень / провал
+box(24, 19, 24, 19, '#');   // уступы подъёма к глыбе (y=19: коридор внизу остаётся проходим)
+box(28, 19, 28, 19, '#');
+
+box( 9, 20, 11, 20, '#');   // постамент части №1
+box(16, 22, 22, 23, 'w');   // затопленный колодец (7 клеток)
+box(16, 21, 22, 21, 'p');   // в прошлом колодец был перекрыт настилом
+box(30, 22, 36, 22, 'm');   // мостки над лавой
+box(30, 23, 36, 23, 'l');   // лавовая канава
+box(29, 20, 37, 20, 'p');   // в прошлом над лавой шла целая галерея
+box(41, 15, 43, 15, 'f');   // кусок средней плиты — в будущем обрушится
+
+box(46, 21, 46, 21, 's');   // снежная лестница в зале C
+box(47, 20, 47, 21, 's');
+box(48, 19, 48, 21, 's');
+box(49, 17, 50, 17, '#');   // каменный карниз под дырами плиты
+box(44, 19, 44, 19, '#');   // ящик
+box(45, 18, 47, 18, 'n');   // заросли-помост (альтернатива снегу)
+
+box(39, 14, 41, 14, '#');   // постамент биоядра
+box(10, 14, 11, 14, '#');   // постамент хроноядра (западный карман)
+
+box(53, 14, 53, 14, 's');   // ледяная лестница средний → верхний
+box(54, 13, 54, 13, 's');
+box(55, 12, 55, 12, 's');
+box(56, 11, 56, 11, 's');
+box(57, 10, 57, 10, 's');
+box(58,  9, 58,  9, 's');
+
+box(60,  4, 60,  7, 't');   // поросль запирает нишу с сердцевиной
+box(59,  8, 61,  8, 'p');   // мост к нише есть только в прошлом (иначе — провал)
+
+/* ── семантика тайлов ──────────────────────────────────────────────────── */
+const EMPTY = 0, SOLID = 1, HAZARD = 2, LADDER = 3;
+const TILE_CACHE = [];      // [world][y*W+x] -> тип
+function tileTypeRaw(ch, t, d, e) {
+  switch (ch) {
+    case '#': return SOLID;
+    case '.': return EMPTY;
+    case 'w': return t === 0 ? SOLID : (t === 1 ? HAZARD : EMPTY);
+    case 'l': return t === 0 ? SOLID : HAZARD;
+    case 'm': return (t === 2 || d === 0) ? EMPTY : SOLID;
+    case 'x': return t === 2 ? EMPTY : SOLID;
+    case 's': return t === 0 ? SOLID : EMPTY;
+    case 'v': return d === 2 ? LADDER : EMPTY;
+    case 'n': return d === 2 ? SOLID : EMPTY;
+    case 't': return d === 0 ? EMPTY : SOLID;
+    case 'a': return d === 0 ? EMPTY : SOLID;
+    case 'p': return e === 0 ? SOLID : EMPTY;
+    case 'f': return e === 2 ? EMPTY : SOLID;
+    case 'r': return e === 2 ? SOLID : EMPTY;
+  }
+  return SOLID;
+}
+for (let w = 0; w < NW; w++) {
+  const arr = new Uint8Array(W * H), t = wtemp(w), d = wwilt(w), e = wera(w);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) arr[y * W + x] = tileTypeRaw(map[y][x], t, d, e);
+  TILE_CACHE.push(arr);
+}
+const tt = (w, x, y) => (x < 0 || x >= W || y < 0 || y >= H) ? SOLID : TILE_CACHE[w][y * W + x];
+const isSolid = (w, x, y) => tt(w, x, y) === SOLID;
+const isHazard = (w, x, y) => tt(w, x, y) === HAZARD;
+const isLadder = (w, x, y) => tt(w, x, y) === LADDER;
+const passable = (w, x, y) => { const v = tt(w, x, y); return v === EMPTY || v === LADDER; };
+
+/* ── части девайса (суперстабильны: одна точка во всех мирах) ──────────── */
+const PART_TERMO = 1, PART_BIO = 2, PART_CHRONO = 4, PART_CORE = 8, ALL_PARTS = 15;
+const PARTS = [
+  { bit: PART_TERMO,  x: 10, y: 19, name: 'ТЕРМОЯДРО', sub: 'ось температуры', col: '#ffb765' },
+  { bit: PART_BIO,    x: 40, y: 13, name: 'БИОЯДРО',   sub: 'ось увядания',    col: '#7de08a' },
+  { bit: PART_CHRONO, x: 10, y: 13, name: 'ХРОНОЯДРО', sub: 'ось эпохи',       col: '#8fd0f5' },
+  { bit: PART_CORE,   x: 62, y:  7, name: 'СЕРДЦЕВИНА', sub: 'девайс собран',  col: '#c9a8ff' },
+];
+
+/* ── двери ─────────────────────────────────────────────────────────────────
+   kind:  HOT   температура +1  (существует при temp === at, at ∈ {0,1})
+          COLD  температура −1  (существует при temp === at, at ∈ {1,2})
+          DECAY увядание   −1  (существует при wilt === at, at ∈ {1,2})
+          BLOOM увядание   +1  (существует при wilt === at, at ∈ {0,1})
+   other: список значений ВТОРОЙ оси, при которых дверь есть.
+   Шаг всегда уводит со значения `at` → в мире-назначении двери нет.       */
+const DOOR_KINDS = {
+  HOT:    { axis: 0, step: +1, name: 'ДВЕРЬ ЖАРЫ',     need: PART_TERMO,  needName: 'термоядро', col: '#ff7a3c', gl: '#ffb066' },
+  COLD:   { axis: 0, step: -1, name: 'ДВЕРЬ ХОЛОДА',   need: PART_TERMO,  needName: 'термоядро', col: '#4fb6f0', gl: '#a5e2ff' },
+  DECAY:  { axis: 1, step: -1, name: 'ДВЕРЬ ТЛЕНА',    need: PART_BIO,    needName: 'биоядро',   col: '#9a8f7a', gl: '#d8cdb4' },
+  BLOOM:  { axis: 1, step: +1, name: 'ДВЕРЬ БУЙСТВА',  need: PART_BIO,    needName: 'биоядро',   col: '#5ac45f', gl: '#a8f0a0' },
+  PAST:   { axis: 2, step: -1, name: 'ДВЕРЬ ПРОШЛОГО', need: PART_CHRONO, needName: 'хроноядро', col: '#c8a15e', gl: '#f0d9a8' },
+  FUTURE: { axis: 2, step: +1, name: 'ДВЕРЬ БУДУЩЕГО', need: PART_CHRONO, needName: 'хроноядро', col: '#8a7ff0', gl: '#c3bcff' },
+};
+const D = (x, y, kind, at) => ({ x, y, kind, at });
+const DOORS = [
+  /* зал A — старт. Полное покрытие по температуре: выход есть в любой версии */
+  D( 1, 21, 'PAST',   1),
+  D( 2, 21, 'HOT',    0),
+  D( 4, 21, 'COLD',   1),
+  D( 6, 21, 'HOT',    1),
+  D( 8, 21, 'COLD',   2),
+  D(12, 21, 'FUTURE', 1),
+  /* дно осушённого колодца (добраться можно только в жаре) */
+  D(18, 23, 'DECAY',  1),
+  D(21, 23, 'BLOOM',  1),
+  /* зал B — между колодцем и лавой */
+  D(23, 21, 'COLD',   1),
+  D(24, 21, 'PAST',   1),
+  D(25, 21, 'HOT',    1),
+  D(27, 21, 'HOT',    0),
+  D(28, 21, 'COLD',   2),
+  /* зал C — узел нижнего яруса */
+  D(38, 21, 'HOT',    0),
+  D(39, 21, 'COLD',   1),
+  D(40, 21, 'HOT',    1),
+  D(41, 21, 'COLD',   2),
+  D(42, 21, 'DECAY',  1),
+  D(43, 21, 'BLOOM',  0),
+  D(44, 21, 'PAST',   2),
+  D(45, 21, 'FUTURE', 1),
+  /* средний ярус, западный карман (только по лианам) */
+  D(12, 14, 'HOT',    0),
+  D(14, 14, 'COLD',   1),
+  D(15, 14, 'COLD',   2),
+  /* средний ярус, карман у колодца */
+  D(24, 14, 'HOT',    0),
+  D(28, 14, 'COLD',   1),
+  D(29, 14, 'COLD',   2),
+  /* средний ярус, восток */
+  D(34, 14, 'HOT',    0),
+  D(35, 14, 'COLD',   1),
+  D(36, 14, 'HOT',    1),
+  D(37, 14, 'COLD',   2),
+  D(46, 14, 'DECAY',  1),
+  D(47, 14, 'BLOOM',  1),
+  D(48, 14, 'FUTURE', 0),
+  /* восточный карман под лестницей — иначе оттуда не выбраться */
+  D(59, 14, 'HOT',    0),
+  D(60, 14, 'COLD',   1),
+  D(61, 14, 'COLD',   2),
+  /* верхний ярус */
+  D(45,  7, 'FUTURE', 0),
+  D(46,  7, 'COLD',   1),
+  D(48,  7, 'HOT',    0),
+  D(50,  7, 'COLD',   2),
+  D(52,  7, 'BLOOM',  0),
+  D(54,  7, 'DECAY',  2),
+];
+DOORS.forEach((d, i) => { d.id = i; d.k = DOOR_KINDS[d.kind]; });
+
+/* Дверь существует там, где её ось стоит в положении `at`.
+   Шаг всегда уводит с этого положения → назад той же дверью нельзя,
+   и при этом дверь есть сразу в 9 версиях из 27 (связность не рушится). */
+const doorHere = (d, w) => waxis(w, d.k.axis) === d.at;
+function doorDest(d, w) {
+  const v = [wtemp(w), wwilt(w), wera(w)];
+  v[d.k.axis] = Math.max(0, Math.min(2, v[d.k.axis] + d.k.step));
+  return widx(v[0], v[1], v[2]);
+}
+const doorAt = (x, y) => DOORS.find(d => d.x === x && d.y === y);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   АУДИТ. Перебор по (клетка × версия мира × набор частей).
+   Модель движения заведомо скромнее живой физики:
+     прыжок вверх    3 клетки  (в игре 3.3)
+     снос по воздуху 4 клетки  (в игре 5.7 по прямой)
+     каждая клетка подъёма СЪЕДАЕТ клетку сноса — в игре подъём на 3 даёт
+     ~3.7 клетки по горизонтали, модель разрешает только 1;
+     рост героя      2 клетки  (в игре 1.48) — требуем более высокие проходы
+   ═══════════════════════════════════════════════════════════════════════════ */
+const JUMP_UP = 3, AIR_H = 4, FALL_H = 3;
+
+function buildSucc(w) {
+  const stand = (x, y) => passable(w, x, y) && passable(w, x, y - 1);
+  const sup = (x, y) => isSolid(w, x, y + 1) || isLadder(w, x, y) || isLadder(w, x, y + 1);
+  const ground = (x, y) => stand(x, y) && sup(x, y);
+  const succ = new Array(W * H).fill(null);
+  const seen = new Int32Array(W * H * 40); let stamp = 0;
+  const qs = new Int32Array(W * H * 40);
+  const enc = (x, y, ph, up, h) => ((y * W + x) * 2 + ph) * 20 + up * 5 + h;
+
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!ground(x, y)) continue;
+    stamp++; let qh = 0, qt = 0;
+    const out = new Set();
+    const push = (nx, ny, ph, up, h) => {
+      if (!stand(nx, ny)) return;
+      const e = enc(nx, ny, ph, up, h);
+      if (seen[e] === stamp) return;
+      seen[e] = stamp; qs[qt++] = e;
+    };
+    /* по лианам вверх/вниз */
+    if (isLadder(w, x, y)) {
+      if (isLadder(w, x, y - 1) && stand(x, y - 1)) out.add((y - 1) * W + x);
+      if (isLadder(w, x, y + 1) && stand(x, y + 1)) out.add((y + 1) * W + x);
+    }
+    /* шаг вбок */
+    for (const dx of [-1, 1]) {
+      const nx = x + dx;
+      if (!stand(nx, y)) continue;
+      if (sup(nx, y)) out.add(y * W + nx);
+      else push(nx, y, 1, 0, FALL_H);           // сошёл с края — падение
+    }
+    /* прыжок */
+    push(x, y, 0, JUMP_UP, AIR_H);
+    while (qh < qt) {
+      const e = qs[qh++];
+      const h = e % 5, up = ((e / 5) | 0) % 4, ph = ((e / 20) | 0) % 2, c = (e / 40) | 0;
+      const cx = c % W, cy = (c / W) | 0;
+      if (sup(cx, cy) && !(cx === x && cy === y)) { out.add(c); continue; }
+      if (ph === 0) {
+        if (up > 0) push(cx, cy - 1, 0, up - 1, Math.max(0, h - 1));
+        if (h > 0) { push(cx - 1, cy, 0, up, h - 1); push(cx + 1, cy, 0, up, h - 1); }
+        push(cx, cy, 1, 0, h);
+      } else {
+        push(cx, cy + 1, 1, 0, h);
+        if (h > 0) { push(cx - 1, cy, 1, 0, h - 1); push(cx + 1, cy, 1, 0, h - 1); }
+      }
+    }
+    out.delete(y * W + x);
+    succ[y * W + x] = Array.from(out);
+  }
+  return succ;
+}
+const SUCC = [];
+for (let w = 0; w < NW; w++) SUCC.push(buildSucc(w));
+const isGroundIn = (w, c) => SUCC[w][c] !== null;
+
+const PART_AT = new Uint8Array(W * H);
+for (const p of PARTS) PART_AT[p.y * W + p.x] |= p.bit;
+const DOOR_AT = new Int32Array(W * H).fill(-1);
+for (const d of DOORS) DOOR_AT[d.y * W + d.x] = d.id;
+
+const START_CELL = 21 * W + 4;
+
+function runAudit() {
+  const rep = { warn: [] };
+
+  /* — структурные проверки — */
+  let badLanding = 0, backdoor = 0, hazardLanding = 0;
+  for (const d of DOORS) {
+    for (let w = 0; w < NW; w++) {
+      if (!doorHere(d, w)) continue;
+      const w2 = doorDest(d, w);
+      if (w2 === w) rep.warn.push('дверь #' + d.id + ' (' + d.k.name + ') в мире ' + worldShort(w) + ' никуда не ведёт');
+      if (doorHere(d, w2)) backdoor++;
+      if (!isGroundIn(w, d.y * W + d.x)) continue;      // сюда всё равно не встать
+      if (!isGroundIn(w2, d.y * W + d.x)) badLanding++;
+      if (isHazard(w2, d.x, d.y)) hazardLanding++;
+    }
+  }
+  rep.backdoor = backdoor; rep.badLanding = badLanding; rep.hazardLanding = hazardLanding;
+
+  /* — прямой обход всего пространства состояний — */
+  const SID = (c, w, p) => (c * NW + w) * 16 + p;
+  const NST = W * H * NW * 16;
+  const idx = new Int32Array(NST).fill(-1);
+  const nodes = [];              // [cell, world, parts]
+  const eFrom = [], eTo = [];    // рёбра графа состояний
+  const norm = (c, p) => p | PART_AT[c];
+  const q = [];
+  function node(c, w, p) {
+    const s = SID(c, w, p);
+    if (idx[s] >= 0) return idx[s];
+    idx[s] = nodes.length; nodes.push([c, w, p]); q.push(idx[s]);
+    return idx[s];
+  }
+  const doorUsed = new Set();
+  node(START_CELL, START_WORLD, norm(START_CELL, 0));
+  for (let qh = 0; qh < q.length; qh++) {
+    const n = q[qh], c = nodes[n][0], w = nodes[n][1], p = nodes[n][2];
+    if (p === ALL_PARTS) continue;                       // победа — терминальное состояние
+    const sc = SUCC[w][c];
+    if (sc) for (let i = 0; i < sc.length; i++) {
+      const c2 = sc[i];
+      eFrom.push(n); eTo.push(node(c2, w, norm(c2, p)));
+    }
+    const did = DOOR_AT[c];
+    if (did >= 0) {
+      const d = DOORS[did];
+      if (doorHere(d, w) && (p & d.k.need)) {
+        const w2 = doorDest(d, w);
+        if (w2 !== w && isGroundIn(w2, c)) {
+          doorUsed.add(did);
+          eFrom.push(n); eTo.push(node(c, w2, norm(c, p)));
+        }
+      }
+    }
+  }
+  rep.states = nodes.length;
+  rep.edges = eFrom.length;
+
+  /* — обратный обход от победы: кто НЕ может дойти до финала — */
+  const head = new Int32Array(nodes.length).fill(-1);
+  const nxt = new Int32Array(eFrom.length).fill(-1);
+  for (let i = 0; i < eFrom.length; i++) { nxt[i] = head[eTo[i]]; head[eTo[i]] = i; }
+  const canWin = new Uint8Array(nodes.length);
+  const bq = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i][2] === ALL_PARTS) { canWin[i] = 1; bq.push(i); }
+  rep.winStates = bq.length;
+  for (let h = 0; h < bq.length; h++) {
+    for (let e = head[bq[h]]; e >= 0; e = nxt[e]) {
+      const f = eFrom[e];
+      if (!canWin[f]) { canWin[f] = 1; bq.push(f); }
+    }
+  }
+  let dead = 0; const deadSample = [];
+  for (let i = 0; i < nodes.length; i++) if (!canWin[i]) {
+    dead++;
+    if (deadSample.length < 6) {
+      const c = nodes[i][0];
+      deadSample.push('(' + (c % W) + ',' + ((c / W) | 0) + ') · ' + worldShort(nodes[i][1]) +
+                      ' · части:' + nodes[i][2]);
+    }
+  }
+  rep.dead = dead; rep.deadSample = deadSample;
+  rep.solvable = rep.winStates > 0;
+
+  /* какие части вообще достижимы */
+  let seenParts = 0;
+  for (let i = 0; i < nodes.length; i++) seenParts |= nodes[i][2];
+  rep.partsReachable = seenParts;
+  rep.doorsUsed = doorUsed.size;
+  rep.doorsDead = DOORS.length - doorUsed.size;
+  rep.deadDoorIds = DOORS.filter(d => !doorUsed.has(d.id)).map(d => d.id);
+
+  /* — макро-граф: маршруты как последовательности дверей — */
+  const regionCache = new Map();
+  function region(c, w) {                     // куда можно дойти без дверей
+    const key = w * W * H + c;
+    if (regionCache.has(key)) return regionCache.get(key);
+    const seen = new Set([c]), st = [c]; let parts = PART_AT[c]; const doors = [];
+    while (st.length) {
+      const u = st.pop();
+      const sc = SUCC[w][u];
+      if (!sc) continue;
+      for (const v of sc) if (!seen.has(v)) { seen.add(v); parts |= PART_AT[v]; st.push(v); }
+    }
+    for (const v of seen) {
+      const id = DOOR_AT[v];
+      if (id >= 0 && doorHere(DOORS[id], w) && doorDest(DOORS[id], w) !== w) doors.push(id);
+    }
+    const r = { parts, doors };
+    regionCache.set(key, r);
+    return r;
+  }
+
+  /* прогрессия: что можно взять вообще без дверей, и нельзя ли взять финал без биоядра */
+  rep.freeParts = region(START_CELL, START_WORLD).parts;
+  let coreEarly = 0, chronoEarly = 0, bioEarly = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const p = nodes[i][2];
+    if ((p & PART_CORE) && (p & (PART_TERMO | PART_BIO | PART_CHRONO)) !== (PART_TERMO | PART_BIO | PART_CHRONO)) coreEarly++;
+    if ((p & PART_CHRONO) && (p & (PART_TERMO | PART_BIO)) !== (PART_TERMO | PART_BIO)) chronoEarly++;
+    if ((p & PART_BIO) && !(p & PART_TERMO)) bioEarly++;
+  }
+  rep.coreEarly = coreEarly; rep.chronoEarly = chronoEarly; rep.bioEarly = bioEarly;
+
+  /* минимум дверей до финала (BFS по макро-состояниям) */
+  const mseen = new Set();
+  const firstAt = {};
+  let mq = [[START_CELL, START_WORLD, 0]], depth = 0, minDoors = -1;
+  while (mq.length && depth < 24 && minDoors < 0) {
+    const nq = [];
+    for (const [c, w, p] of mq) {
+      const r = region(c, w);
+      const p2 = p | r.parts;
+      for (const b of [1, 2, 4, 8]) if ((p2 & b) && firstAt[b] === undefined) firstAt[b] = depth;
+      if (p2 === ALL_PARTS) { minDoors = depth; break; }
+      for (const id of r.doors) {
+        const d = DOORS[id];
+        if (!(p2 & d.k.need)) continue;
+        const w2 = doorDest(d, w);
+        const key = d.x + ',' + d.y + ',' + w2 + ',' + p2;
+        if (mseen.has(key)) continue;
+        mseen.add(key); nq.push([d.y * W + d.x, w2, p2]);
+      }
+    }
+    if (minDoors >= 0) break;
+    mq = nq; depth++;
+  }
+  rep.minDoors = minDoors; rep.firstAt = firstAt;
+
+  /* перебор маршрутов: последовательности дверей без повторов */
+  const routes = new Set(), doorSets = new Set();
+  const MAXSEQ = Math.max(6, (minDoors < 0 ? 6 : minDoors) + 2);
+  rep.maxSeq = MAXSEQ;
+  let nodesVisited = 0, capped = false;
+  (function dfs(c, w, p, used, seq) {
+    if (capped || seq.length > MAXSEQ) return;
+    if (++nodesVisited > 260000) { capped = true; return; }
+    const r = region(c, w);
+    const p2 = p | r.parts;
+    if (p2 === ALL_PARTS) {
+      routes.add(seq.join('>'));
+      doorSets.add(seq.slice().sort((a, b) => a - b).join(','));
+      return;
+    }
+    for (const id of r.doors) {
+      if (used.has(id)) continue;
+      const d = DOORS[id];
+      if (!(p2 & d.k.need)) continue;
+      const w2 = doorDest(d, w);
+      used.add(id); seq.push(id);
+      dfs(d.y * W + d.x, w2, p2, used, seq);
+      seq.pop(); used.delete(id);
+    }
+  })(START_CELL, START_WORLD, 0, new Set(), []);
+  rep.routes = routes.size; rep.doorSets = doorSets.size; rep.capped = capped;
+
+  /* пример маршрута покороче */
+  let best = null;
+  for (const r of routes) { const a = r ? r.split('>') : []; if (!best || a.length < best.length) best = a; }
+  rep.bestRoute = best ? best.map(i => {
+    const d = DOORS[+i];
+    return d.k.name.replace('ДВЕРЬ ', '').toLowerCase() + '(' + d.x + ',' + d.y + ')';
+  }).join(' → ') : '—';
+
+  return rep;
+}
+let AUDIT = null;
+function printAudit() {
+  const t0 = performance.now();
+  AUDIT = runAudit();
+  const ms = Math.round(performance.now() - t0);
+  const a = AUDIT;
+  const yn = (b, good) => '<span class="' + (b === good ? 'ok' : 'bad') + '">' + (b ? 'ДА' : 'НЕТ') + '</span>';
+  const num = (v, good) => '<span class="' + (v === good ? 'ok' : 'bad') + '">' + v + '</span>';
+  const pn = ['термоядро', 'биоядро', 'хроноядро', 'сердцевина'].filter((_, i) => a.partsReachable & (1 << i)).join(', ');
+  let s = '';
+  s += '<b>АУДИТ</b> перебором по (клетка × версия мира × набор частей), 27 версий мира: ' +
+       a.states.toLocaleString('ru') + ' состояний, ' + a.edges.toLocaleString('ru') + ' переходов, ' + ms + ' мс\n';
+  s += 'решается: ' + yn(a.solvable, true) + '   ·   достижимые части: <b>' + (pn || '—') + '</b>' +
+       '   ·   минимум дверей до финала: <b>' + a.minDoors + '</b>\n';
+  s += '<b>ТУПИКОВ</b> (состояний, из которых финал уже недостижим): ' + num(a.dead, 0) +
+       (a.dead ? '  ← примеры: ' + a.deadSample.join(' | ') : '  — застрять нельзя ни в одной из 27 версий') + '\n';
+  s += 'маршрутов (разных последовательностей дверей, без повторов, ≤' + a.maxSeq + ' шагов): <b>' + a.routes.toLocaleString('ru') + '</b>' +
+       (a.capped ? ' <span class="w">(перебор обрезан по лимиту)</span>' : '') +
+       '   ·   разных наборов дверей: <b>' + a.doorSets.toLocaleString('ru') + '</b>\n';
+  s += 'прогрессия: без дверей доступно <b>' + (a.freeParts === PART_TERMO ? 'только термоядро' : 'частей=' + a.freeParts) +
+       '</b> · термоядро с ' + a.firstAt[1] + ' дверей, биоядро с ' + a.firstAt[2] +
+       ', хроноядро с ' + a.firstAt[4] + ', сердцевина с ' + a.firstAt[8] + '\n';
+  s += 'порядок частей: биоядро без термоядра ' + num(a.bioEarly, 0) + ' сост. · хроноядро без двух первых ' +
+       num(a.chronoEarly, 0) + ' сост. · финал без трёх первых ' + num(a.coreEarly, 0) + ' сост.\n';
+  s += 'дверей всего ' + DOORS.length + ', из них рабочих ' + a.doorsUsed +
+       (a.doorsDead ? ', <span class="w">ни разу не срабатывает ' + a.doorsDead + ' (номера: ' + a.deadDoorIds.join(',') + ')</span>' : '') + '\n';
+  s += 'проверки: возврат той же дверью ' + num(a.backdoor, 0) + ' · посадка вне пола ' + num(a.badLanding, 0) +
+       ' · посадка в лаву/воду ' + num(a.hazardLanding, 0) +
+       (a.warn.length ? '\n<span class="w">' + a.warn.join('\n') + '</span>' : '');
+  document.getElementById('audit').innerHTML = s;
+  return a;
+}
+printAudit();
+/* ═══════════════════════════════════════════════════════════════════════════
+   ИГРА
+   ═══════════════════════════════════════════════════════════════════════════ */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const PW = T * 0.60, PH = T * 1.48;         // герой уже и ниже, чем клетка модели аудита
+const GRAV = 2392, JUMPV = 906, RUN = 392, CLIMB = 210, MAXFALL = 1180;
+
+const G = {
+  world: START_WORLD, parts: 0, px: 4.5 * T, py: 22 * T, vx: 0, vy: 0,
+  face: 1, onGround: false, onLadder: false, coyote: 0, jbuf: 0, walkT: 0,
+  safe: [4.5 * T, 22 * T], dead: 0, win: 0, msg: '', msgT: 0,
+  trans: null, flash: 0, shake: 0, t: 0, near: null, showMap: false,
+  wave: null, needle: [0, 0, 0],
+};
+const keys = {};
+addEventListener('keydown', e => {
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) e.preventDefault();
+  if (keys[e.key.toLowerCase()]) return;
+  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  if (k === 'w' || k === ' ' || k === 'arrowup') G.jbuf = 0.13;
+  if (k === 'e') tryDoor();
+  if (k === 'r') restart();
+  if (k === 'tab') G.showMap = !G.showMap;
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+const kL = () => keys['a'] || keys['arrowleft'];
+const kR = () => keys['d'] || keys['arrowright'];
+const kU = () => keys['w'] || keys['arrowup'] || keys[' '];
+const kD = () => keys['s'] || keys['arrowdown'];
+
+function restart() {
+  G.world = START_WORLD; G.parts = 0; G.px = 4.5 * T; G.py = 22 * T; G.vx = G.vy = 0;
+  G.safe = [G.px, G.py]; G.dead = 0; G.win = 0; G.trans = null; G.flash = 0;
+  say('Девайс разбился. Собери четыре части.', 3.4); bake(true); seedParticles(true);
+}
+function say(m, t) { G.msg = m; G.msgT = t || 2.6; }
+
+/* ── столкновения ──────────────────────────────────────────────────────── */
+function solidBox(x0, y0, x1, y1) {
+  const a = Math.floor(x0 / T), b = Math.floor((x1 - 0.01) / T);
+  const c = Math.floor(y0 / T), d = Math.floor((y1 - 0.01) / T);
+  for (let y = c; y <= d; y++) for (let x = a; x <= b; x++) if (isSolid(G.world, x, y)) return true;
+  return false;
+}
+function hazardBox(x0, y0, x1, y1) {
+  const a = Math.floor(x0 / T), b = Math.floor((x1 - 0.01) / T);
+  const c = Math.floor(y0 / T), d = Math.floor((y1 - 0.01) / T);
+  for (let y = c; y <= d; y++) for (let x = a; x <= b; x++) if (isHazard(G.world, x, y)) return true;
+  return false;
+}
+const bodyL = () => G.px - PW / 2, bodyR = () => G.px + PW / 2, bodyT = () => G.py - PH;
+function ladderHere() {
+  const cx = Math.floor(G.px / T);
+  const y1 = Math.floor((G.py - 4) / T), y2 = Math.floor((G.py - PH * 0.55) / T);
+  return isLadder(G.world, cx, y1) || isLadder(G.world, cx, y2);
+}
+function feetCell() { return [Math.floor(G.px / T), Math.floor((G.py - 4) / T)]; }
+
+function physics(dt) {
+  const want = (kR() ? 1 : 0) - (kL() ? 1 : 0);
+  if (want) G.face = want;
+  const acc = G.onGround ? 3800 : 2200;
+  G.vx += Math.max(-acc * dt, Math.min(acc * dt, want * RUN - G.vx));
+  if (!want) G.vx *= G.onGround ? 0.72 : 0.94;
+
+  G.onLadder = ladderHere() && (kU() || kD() || G.onLadder);
+  if (G.onLadder && ladderHere()) {
+    G.vy = (kD() ? CLIMB : 0) - (kU() ? CLIMB : 0);
+    if (!kU() && !kD()) G.vy = 0;
+    if (kU() || kD()) {                       // мягко центрируем на лиане
+      const col = (Math.floor(G.px / T) + 0.5) * T;
+      G.px += (col - G.px) * Math.min(1, dt * 9);
+    }
+  } else {
+    G.onLadder = false;
+    G.vy = Math.min(MAXFALL, G.vy + GRAV * dt);
+  }
+  if (G.jbuf > 0 && (G.onGround || G.coyote > 0 || G.onLadder)) {
+    G.vy = -JUMPV; G.jbuf = 0; G.coyote = 0; G.onGround = false; G.onLadder = false;
+  }
+
+  /* X (с маленькой ступенькой вверх — иначе слезть с лианы на пол невозможно) */
+  G.px += G.vx * dt;
+  if (solidBox(bodyL(), bodyT(), bodyR(), G.py)) {
+    const oldY = G.py;
+    let stepped = false;
+    for (let s = 2; s <= 12; s += 2) {
+      G.py = oldY - s;
+      if (!solidBox(bodyL(), bodyT(), bodyR(), G.py)) { stepped = true; break; }
+    }
+    if (!stepped) {
+      G.py = oldY;
+      const dir = Math.sign(G.vx) || 1;
+      while (solidBox(bodyL(), bodyT(), bodyR(), G.py)) G.px -= dir * 0.9;
+      G.vx = 0;
+    }
+  }
+  /* Y */
+  G.py += G.vy * dt;
+  G.onGround = false;
+  if (solidBox(bodyL(), bodyT(), bodyR(), G.py)) {
+    const dir = Math.sign(G.vy) || 1;
+    while (solidBox(bodyL(), bodyT(), bodyR(), G.py)) G.py -= dir * 0.9;
+    if (dir > 0) { G.onGround = true; }
+    G.vy = 0;
+  }
+  if (!G.onLadder && solidBox(bodyL() + 3, G.py, bodyR() - 3, G.py + 2)) G.onGround = true;
+  G.coyote = G.onGround ? 0.10 : Math.max(0, G.coyote - dt);
+  G.jbuf = Math.max(0, G.jbuf - dt);
+  G.px = Math.max(PW, Math.min(W * T - PW, G.px));
+
+  if (G.onGround && Math.abs(G.vx) > 12) G.walkT += dt * 9; else G.walkT *= 0.86;
+
+  /* смерть в лаве / воде */
+  if (hazardBox(bodyL() + 6, bodyT() + PH * 0.35, bodyR() - 6, G.py - 4)) {
+    const t = wtemp(G.world);
+    G.dead = 1.0;
+    say(isSolidWaterCell() ? 'Утонул.' : (t === 0 ? 'Утонул.' : 'Сгорел в лаве.'), 1.6);
+  }
+  if (G.onGround && !hazardBox(bodyL(), bodyT(), bodyR(), G.py) && G.py > 0) G.safe = [G.px, G.py];
+
+  /* части */
+  for (const p of PARTS) {
+    if (G.parts & p.bit) continue;
+    if (Math.abs(G.px - (p.x + 0.5) * T) < T * 0.5 + PW / 2 &&
+        Math.abs((G.py - PH / 2) - (p.y + 0.5) * T) < T * 0.5 + PH / 2) {
+      G.parts |= p.bit; G.flash = Math.max(G.flash, 0.75); G.shake = 0.35;
+      if (p.bit === PART_CORE) { G.win = 1; say('ДЕВАЙС СОБРАН.', 99); }
+      else say('Часть найдена: ' + p.name + ' — открыта ' + p.sub + '.', 4.2);
+      bake(true);
+    }
+  }
+}
+function isSolidWaterCell() {
+  const [cx, cy] = feetCell();
+  return map[cy] && map[cy][cx] === 'w';
+}
+
+/* ── двери ─────────────────────────────────────────────────────────────── */
+function nearDoor() {
+  const [cx, cy] = feetCell();
+  let best = null, bd = 1e9;
+  for (const d of DOORS) {
+    if (d.y !== cy) continue;
+    if (!doorHere(d, G.world)) continue;            // в этом мире двери нет — её и не существует
+    if (d.x === cx) return d;                       // дверь ровно в клетке под ногами — она и есть
+    const dist = Math.abs((d.x + 0.5) * T - G.px);
+    if (dist < T * 0.60 && dist < bd) { bd = dist; best = d; }
+  }
+  return best;
+}
+function tryDoor() {
+  if (G.trans || G.win || G.dead) return;
+  const d = nearDoor();
+  if (!d) return;
+  if (!doorHere(d, G.world)) { say('Здесь только заложенный проём — в этом мире двери нет.', 2.4); return; }
+  if (!(G.parts & d.k.need)) { say('Заперто. Нужна часть: ' + d.k.needName + '.', 2.6); return; }
+  const w2 = doorDest(d, G.world);
+  if (w2 === G.world) return;
+  startTransition(d, w2);
+}
+/* ── палитра ───────────────────────────────────────────────────────────── */
+const cl = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
+const rgb = (c, a) => a === undefined ? 'rgb(' + cl(c[0]) + ',' + cl(c[1]) + ',' + cl(c[2]) + ')'
+                                      : 'rgba(' + cl(c[0]) + ',' + cl(c[1]) + ',' + cl(c[2]) + ',' + a + ')';
+const sh = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
+const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+const TM = [[0.72, 0.90, 1.20], [1, 1, 1], [1.20, 0.92, 0.74]];
+const DM = [[0.90, 0.86, 0.78], [1, 1, 1], [0.88, 1.10, 0.84]];
+const EM = [[1.12, 1.02, 0.86], [1, 1, 1], [0.86, 0.92, 1.02]];   // прошлое теплее, будущее холоднее
+const AMB = [[74, 100, 148], [96, 96, 116], [150, 92, 56]];
+const AMBD = [[92, 86, 76], [96, 96, 116], [72, 118, 70]];
+const AMBE = [[126, 104, 70], [96, 96, 116], [78, 88, 112]];
+function pal(w) {
+  const t = wtemp(w), d = wwilt(w), e = wera(w);
+  const f = c => [c[0] * TM[t][0] * DM[d][0] * EM[e][0],
+                  c[1] * TM[t][1] * DM[d][1] * EM[e][1],
+                  c[2] * TM[t][2] * DM[d][2] * EM[e][2]];
+  return {
+    t, d, e,
+    stone: f([120, 122, 134]), top: f([164, 168, 180]), side: f([78, 80, 92]),
+    back: f([42, 45, 56]), brick: f([62, 66, 80]), deep: f([20, 21, 29]),
+    amb: mixc(mixc(AMB[t], AMBD[d], 0.5), AMBE[e], 0.34),
+    moss: d === 2, dry: d === 0, ruin: e === 2, whole: e === 0,
+  };
+}
+
+/* ── дальний план: у каждой эпохи свой силуэт ──────────────────────────── */
+function drawParallax() {
+  const P = pal(G.world), e = P.e, t = P.t, d = P.d;
+  const sky = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+  const c1 = mixc(P.amb, [255, 255, 255], 0.18), c2 = sh(P.amb, 0.45);
+  sky.addColorStop(0, rgb(c1)); sky.addColorStop(1, rgb(c2));
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (t === 2) {                                        // зарево жары
+    const g2 = ctx.createRadialGradient(VIEW_W * 0.5, VIEW_H, 20, VIEW_W * 0.5, VIEW_H, VIEW_H);
+    g2.addColorStop(0, 'rgba(220,90,30,0.55)'); g2.addColorStop(1, 'rgba(220,90,30,0)');
+    ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+  const ox = -cam.x * 0.22, oy = -cam.y * 0.10;
+  ctx.save(); ctx.translate(ox % 420 - 60, oy);
+  for (let i = 0; i < 12; i++) {
+    const bx = i * 210, base = VIEW_H * 0.86, hh = 150 + ((i * 97) % 130);
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = rgb(mixc(P.amb, [0, 0, 0], 0.60));
+    if (e === 0) {                                       // ПРОШЛОЕ — целые башни
+      ctx.fillRect(bx, base - hh, 84, hh);
+      ctx.beginPath(); ctx.moveTo(bx - 8, base - hh); ctx.lineTo(bx + 42, base - hh - 46);
+      ctx.lineTo(bx + 92, base - hh); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.3; ctx.fillStyle = rgb(mixc(P.amb, [255, 220, 150], 0.35));
+      for (let k = 0; k < 3; k++) ctx.fillRect(bx + 24, base - hh + 30 + k * 40, 14, 22);
+    } else if (e === 2) {                                // БУДУЩЕЕ — обрушенные силуэты
+      ctx.beginPath();
+      ctx.moveTo(bx, base); ctx.lineTo(bx, base - hh * 0.7);
+      ctx.lineTo(bx + 26, base - hh); ctx.lineTo(bx + 44, base - hh * 0.45);
+      ctx.lineTo(bx + 70, base - hh * 0.8); ctx.lineTo(bx + 78, base);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(bx + 86, base - 26, 40, 26);
+    } else {                                             // НАСТОЯЩЕЕ — ровные стены
+      ctx.fillRect(bx, base - hh * 0.8, 96, hh * 0.8);
+      ctx.globalAlpha = 0.28; ctx.fillStyle = rgb(mixc(P.amb, [0, 0, 0], 0.3));
+      ctx.fillRect(bx + 100, base - hh * 0.5, 60, hh * 0.5);
+    }
+    if (d === 2) {                                       // буйство — кроны поверх
+      ctx.globalAlpha = 0.45; ctx.fillStyle = 'rgba(60,120,50,0.9)';
+      ctx.beginPath(); ctx.ellipse(bx + 40, base - hh - 10, 70, 34, 0, 0, 6.3); ctx.fill();
+    }
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+  if (t === 0) { ctx.fillStyle = 'rgba(190,215,240,0.10)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
+  if (d === 0) { ctx.fillStyle = 'rgba(90,86,80,0.16)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
+}
+const DEPX = 14, DEPY = -16;                     // вектор «вглубь»
+const mkMap = () => { const c = document.createElement('canvas'); c.width = W * T; c.height = H * T; return c; };
+let mapCv = mkMap(), mapPrev = mkMap();          // текущая и прошлая версия мира (для волны и призрака)
+let mg = mapCv.getContext('2d');
+
+/* проломы в задней стене — сквозь них виден дальний план */
+const BREACHES = [];
+for (let x = 5; x < W - 5; x += 9) {
+  for (const y of [6, 12, 19]) {
+    let ok = true;
+    for (let yy = y - 2; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 2; xx++)
+      if (!map[yy] || map[yy][xx] !== '.') ok = false;
+    if (ok) BREACHES.push({ x, y });
+  }
+}
+
+/* факелы на задней стене — одни и те же во всех мирах (якорь «место то же») */
+const TORCHES = [];
+for (let x = 1; x < W - 2; x += 4) for (let y = 2; y < H - 1; y++) {
+  if (map[y][x] !== '.' || map[y + 1][x] !== '#') continue;           // пол под ногами
+  if (map[y - 1][x] !== '.' || map[y - 2][x] !== '.') continue;       // есть место над
+  if (DOORS.some(d => d.x === x && Math.abs(d.y - y) < 3)) continue;
+  TORCHES.push({ x: x + 0.5, y: y - 1.15, s: (x % 2) ? 1 : -1, ph: Math.random() * 6.3 });
+  y += 3;
+}
+
+/* ── кирпичи задней стены ──────────────────────────────────────────────── */
+function bakeBack(P) {
+  mg.fillStyle = rgb(P.back); mg.fillRect(0, 0, W * T, H * T);
+  const bh = T / 3, bw = T / 2;
+  for (let y = 0; y * bh < H * T; y++) {
+    const off = (y % 2) * bw * 0.5;
+    for (let x = -1; x * bw < W * T; x++) {
+      const bx = x * bw + off + DEPX, by = y * bh + DEPY;
+      const n = ((x * 7 + y * 13) % 5) / 5;
+      mg.fillStyle = rgb(sh(P.brick, 0.82 + n * 0.34));
+      mg.fillRect(bx + 1.5, by + 1.5, bw - 3, bh - 3);
+    }
+  }
+  /* глубинная тень сверху вниз */
+  const gr = mg.createLinearGradient(0, 0, 0, H * T);
+  gr.addColorStop(0, rgb(P.deep, 0.55)); gr.addColorStop(0.45, rgb(P.deep, 0.15)); gr.addColorStop(1, rgb(P.deep, 0.6));
+  mg.fillStyle = gr; mg.fillRect(0, 0, W * T, H * T);
+  /* проломы наружу: в будущем шире, в прошлом заложены наглухо */
+  const e = P.e;
+  for (const b of BREACHES) {
+    const cx = (b.x + 0.5) * T + DEPX, cy = (b.y + 0.5) * T + DEPY;
+    const rw = T * (e === 2 ? 1.35 : e === 0 ? 0.62 : 1.0), rh = T * (e === 2 ? 1.5 : e === 0 ? 0.7 : 1.15);
+    mg.save();
+    mg.globalCompositeOperation = 'destination-out';
+    mg.beginPath();
+    for (let i = 0; i <= 14; i++) {
+      const a = i / 14 * 6.2832;
+      const k = 1 + 0.18 * Math.sin(a * 3 + b.x) + (e === 2 ? 0.16 * Math.sin(a * 5 + b.y) : 0);
+      const px = cx + Math.cos(a) * rw * k, py = cy + Math.sin(a) * rh * k;
+      i ? mg.lineTo(px, py) : mg.moveTo(px, py);
+    }
+    mg.closePath(); mg.fill();
+    mg.restore();
+    mg.strokeStyle = rgb(sh(P.stone, 0.55), 0.9); mg.lineWidth = 3;
+    mg.beginPath(); mg.ellipse(cx, cy, rw, rh, 0, 0, 6.2832); mg.stroke();
+  }
+}
+
+/* блок с толщиной */
+function drawBlock(x, y, P, colF, colT, colS, w2) {
+  const X = x * T, Y = y * T, w = w2 || 1;
+  const solidUp = isSolid(G.world, x, y - 1), solidR = isSolid(G.world, x + 1, y), solidD = isSolid(G.world, x, y + 1);
+  mg.beginPath();
+  if (!solidUp) {                                    // верхняя грань уходит вглубь
+    mg.moveTo(X, Y); mg.lineTo(X + T, Y); mg.lineTo(X + T + DEPX, Y + DEPY); mg.lineTo(X + DEPX, Y + DEPY);
+    mg.closePath(); mg.fillStyle = rgb(colT); mg.fill(); mg.beginPath();
+  }
+  if (!solidR) {                                     // правая грань
+    mg.moveTo(X + T, Y); mg.lineTo(X + T + DEPX, Y + DEPY); mg.lineTo(X + T + DEPX, Y + T + DEPY); mg.lineTo(X + T, Y + T);
+    mg.closePath(); mg.fillStyle = rgb(colS); mg.fill();
+  }
+  mg.fillStyle = rgb(colF); mg.fillRect(X, Y, T, T);
+  /* фактура камня */
+  const n = ((x * 13 + y * 29) % 7) / 7;
+  mg.fillStyle = rgb(sh(colF, 1.10), 0.5); mg.fillRect(X + 3, Y + 3 + n * 6, T * 0.45, T * 0.22);
+  mg.fillStyle = rgb(sh(colF, 0.86), 0.55); mg.fillRect(X + T * 0.52, Y + T * 0.55 - n * 5, T * 0.4, T * 0.3);
+  mg.strokeStyle = rgb(sh(colF, 0.62), 0.85); mg.lineWidth = 1.5;
+  mg.strokeRect(X + 0.7, Y + 0.7, T - 1.4, T - 1.4);
+  if (!solidUp) {                                    // блик по кромке
+    mg.strokeStyle = rgb(sh(colT, 1.25), 0.75); mg.beginPath();
+    mg.moveTo(X, Y + 0.8); mg.lineTo(X + T, Y + 0.8); mg.stroke();
+  }
+  if (P.moss && !solidUp) {                          // мох в буйстве
+    mg.fillStyle = 'rgba(96,150,70,0.5)';
+    for (let i = 0; i < 5; i++) { const px = X + ((x * 17 + i * 23) % T); mg.fillRect(px, Y - 1, 4 + (i % 3) * 3, 4 + ((i * 7) % 5)); }
+  }
+  if (!solidD) { mg.fillStyle = 'rgba(0,0,0,0.35)'; mg.fillRect(X, Y + T - 4, T, 4); }
+}
+
+/* тень на задней стене под перекрытиями */
+function drawAO(P) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (isSolid(G.world, x, y)) continue;
+    const X = x * T, Y = y * T;
+    if (isSolid(G.world, x, y - 1)) {
+      const g2 = mg.createLinearGradient(0, Y, 0, Y + T * 0.7);
+      g2.addColorStop(0, 'rgba(0,0,0,0.62)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+      mg.fillStyle = g2; mg.fillRect(X, Y, T, T * 0.7);
+    }
+    if (isSolid(G.world, x - 1, y)) {
+      const g2 = mg.createLinearGradient(X, 0, X + T * 0.55, 0);
+      g2.addColorStop(0, 'rgba(0,0,0,0.45)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+      mg.fillStyle = g2; mg.fillRect(X, Y, T * 0.55, T);
+    }
+    if (isSolid(G.world, x + 1, y)) {
+      const g2 = mg.createLinearGradient(X + T, 0, X + T * 0.45, 0);
+      g2.addColorStop(0, 'rgba(0,0,0,0.45)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+      mg.fillStyle = g2; mg.fillRect(X + T * 0.45, Y, T * 0.55, T);
+    }
+  }
+}
+/* ── знаки дверей ──────────────────────────────────────────────────────── */
+function sigil(g, kind, cx, cy, r, col, a) {
+  g.save(); g.globalAlpha = a === undefined ? 1 : a;
+  g.strokeStyle = col; g.fillStyle = col; g.lineWidth = Math.max(1.5, r * 0.16); g.lineCap = 'round';
+  if (kind === 'COLD') {
+    for (let i = 0; i < 3; i++) {
+      const A = i * Math.PI / 3;
+      g.beginPath(); g.moveTo(cx - Math.cos(A) * r, cy - Math.sin(A) * r);
+      g.lineTo(cx + Math.cos(A) * r, cy + Math.sin(A) * r); g.stroke();
+      for (const s of [-1, 1]) {
+        g.beginPath();
+        g.moveTo(cx + Math.cos(A) * r * s, cy + Math.sin(A) * r * s);
+        g.lineTo(cx + Math.cos(A + 0.6) * r * 0.55 * s, cy + Math.sin(A + 0.6) * r * 0.55 * s); g.stroke();
+      }
+    }
+  } else if (kind === 'HOT') {
+    g.beginPath(); g.moveTo(cx, cy - r);
+    g.quadraticCurveTo(cx + r * 0.95, cy - r * 0.1, cx, cy + r);
+    g.quadraticCurveTo(cx - r * 0.95, cy - r * 0.1, cx, cy - r); g.fill();
+    g.globalAlpha = (a === undefined ? 1 : a) * 0.55;
+    g.beginPath(); g.moveTo(cx, cy - r * 0.25);
+    g.quadraticCurveTo(cx + r * 0.45, cy + r * 0.2, cx, cy + r * 0.8);
+    g.quadraticCurveTo(cx - r * 0.45, cy + r * 0.2, cx, cy - r * 0.25); g.fillStyle = '#fff2cf'; g.fill();
+  } else if (kind === 'BLOOM') {
+    g.beginPath(); g.moveTo(cx, cy + r); g.lineTo(cx, cy - r * 0.5); g.stroke();
+    for (const s of [-1, 1]) {
+      g.beginPath(); g.moveTo(cx, cy + r * 0.25);
+      g.quadraticCurveTo(cx + s * r * 0.95, cy - r * 0.15, cx + s * r * 0.15, cy - r * 0.85);
+      g.quadraticCurveTo(cx + s * r * 0.15, cy - r * 0.1, cx, cy + r * 0.25); g.fill();
+    }
+  } else {
+    g.beginPath(); g.arc(cx, cy - r * 0.15, r * 0.62, 0, 6.3); g.stroke();
+    g.beginPath(); g.moveTo(cx, cy + r * 0.5); g.lineTo(cx, cy + r); g.stroke();
+    for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx, cy + r * 0.72); g.lineTo(cx + s * r * 0.5, cy + r); g.stroke(); }
+  }
+  g.restore();
+}
+function archPath(g, cx, by, w, h) {
+  g.beginPath(); g.moveTo(cx - w / 2, by); g.lineTo(cx - w / 2, by - h + w / 2);
+  g.arc(cx, by - h + w / 2, w / 2, Math.PI, 0); g.lineTo(cx + w / 2, by); g.closePath();
+}
+function bakeDoor(d, P) {
+  const cx = (d.x + 0.5) * T, by = (d.y + 1) * T, w = T * 1.04, h = T * 1.66;
+  const here = doorHere(d, G.world), locked = !(G.parts & d.k.need);
+  /* Двери, которой в этой версии мира нет, не существует — не рисуем ВООБЩЕ.
+     Раньше на её месте оставался «заложенный проём», и от них рябило в глазах. */
+  if (!here) return;
+  /* наличник */
+  archPath(mg, cx, by, w + 15, h + 13);
+  mg.fillStyle = rgb(sh(P.stone, 0.75)); mg.fill();
+  mg.strokeStyle = rgb(sh(P.stone, 1.25), 0.7); mg.lineWidth = 2; mg.stroke();
+  /* скос проёма — уходит вглубь */
+  mg.save(); archPath(mg, cx, by, w + 15, h + 13); mg.clip();
+  mg.fillStyle = rgb(sh(P.stone, 0.42));
+  mg.beginPath(); mg.moveTo(cx - w / 2 - 8, by); mg.lineTo(cx - w / 2 - 8, by - h);
+  mg.lineTo(cx - w / 2 + 8 + DEPX * 0.5, by - h + 10); mg.lineTo(cx - w / 2 + 8 + DEPX * 0.5, by); mg.fill();
+  mg.restore();
+  const ix = cx + DEPX * 0.42, iy = DEPY * 0.42;
+  mg.save(); archPath(mg, ix, by + iy, w, h); mg.clip();
+  if (here) {
+    const g2 = mg.createLinearGradient(ix - w / 2, by - h, ix + w / 2, by);
+    g2.addColorStop(0, locked ? '#20242e' : d.k.col);
+    g2.addColorStop(0.5, locked ? '#161920' : d.k.gl);
+    g2.addColorStop(1, locked ? '#0e1016' : d.k.col);
+    mg.fillStyle = g2; mg.fillRect(ix - w, by - h - 10 + iy, w * 2, h + 20);
+    mg.globalAlpha = 0.30; mg.fillStyle = '#000';
+    for (let i = 0; i < 7; i++) mg.fillRect(ix - w / 2, by + iy - h + i * (h / 7), w, 2.5);
+    mg.globalAlpha = 1;
+    sigil(mg, d.kind, ix, by + iy - h * 0.52, T * 0.30, locked ? '#4a5060' : '#fff8ea', locked ? 0.85 : 0.95);
+    if (locked) {
+      mg.fillStyle = '#3a4152';
+      mg.fillRect(ix - 7, by + iy - h * 0.20, 14, 11);
+      mg.strokeStyle = '#3a4152'; mg.lineWidth = 3;
+      mg.beginPath(); mg.arc(ix, by + iy - h * 0.20, 5.5, Math.PI, 0); mg.stroke();
+    }
+  } else {
+    /* заложенный проём — дверь была здесь, но в этом мире её нет */
+    mg.fillStyle = rgb(sh(P.stone, 0.52)); mg.fillRect(ix - w, by - h - 10 + iy, w * 2, h + 20);
+    const bw = w / 2.2, bh = T / 3.4;
+    for (let r = 0; r * bh < h + 14; r++) for (let c = -2; c < 3; c++) {
+      const bx = ix - w / 2 + c * bw + (r % 2) * bw * 0.5, byy = by + iy - h - 6 + r * bh;
+      mg.fillStyle = rgb(sh(P.stone, 0.60 + ((r * 5 + c * 3) % 4) * 0.07));
+      mg.fillRect(bx + 1.5, byy + 1.5, bw - 3, bh - 3);
+    }
+    sigil(mg, d.kind, ix, by + iy - h * 0.52, T * 0.26, d.k.col, 0.20);
+  }
+  mg.restore();
+  archPath(mg, ix, by + iy, w, h);
+  mg.strokeStyle = 'rgba(0,0,0,0.75)'; mg.lineWidth = 3.5; mg.stroke();
+}
+
+/* ── спец-материалы ────────────────────────────────────────────────────── */
+const MAT = {
+  ice:   { f: [138, 186, 220], t: [198, 232, 250], s: [98, 140, 184] },
+  snow:  { f: [198, 214, 236], t: [240, 248, 255], s: [152, 174, 204] },
+  basalt:{ f: [48, 42, 46], t: [70, 62, 66], s: [30, 27, 30] },
+  wood:  { f: [112, 78, 46], t: [146, 106, 64], s: [74, 50, 28] },
+  bush:  { f: [54, 92, 42], t: [88, 138, 58], s: [36, 64, 30] },
+  brickw:{ f: [98, 76, 60], t: [126, 100, 78], s: [66, 50, 38] },
+  old:   { f: [146, 124, 88], t: [186, 162, 116], s: [98, 82, 58] },
+  frail: { f: [96, 92, 88], t: [128, 124, 118], s: [62, 60, 58] },
+  rub:   { f: [86, 84, 92], t: [118, 116, 126], s: [58, 57, 64] },
+};
+function bakeTile(x, y, ch, P) {
+  const X = x * T, Y = y * T, ty = tileTypeRaw(ch, P.t, P.d);
+  if (ch === 'w') {
+    if (ty === SOLID) {                                  // лёд
+      drawBlock(x, y, P, MAT.ice.f, MAT.ice.t, MAT.ice.s);
+      mg.strokeStyle = 'rgba(255,255,255,0.45)'; mg.lineWidth = 1.4;
+      for (let i = 0; i < 3; i++) {
+        mg.beginPath(); mg.moveTo(X + 6 + i * 15, Y + 4); mg.lineTo(X + 14 + i * 13, Y + T - 6); mg.stroke();
+      }
+    } else if (ty === HAZARD) {                          // вода
+      mg.fillStyle = 'rgba(18,44,86,0.86)'; mg.fillRect(X, Y, T, T);
+      mg.fillStyle = 'rgba(60,120,180,0.30)';
+      for (let i = 0; i < 3; i++) mg.fillRect(X, Y + 8 + i * 15, T, 4);
+      if (map[y - 1] && map[y - 1][x] !== 'w') {
+        mg.fillStyle = 'rgba(150,205,240,0.55)'; mg.fillRect(X, Y, T, 4);
+        mg.fillStyle = 'rgba(150,205,240,0.18)'; mg.fillRect(X, Y + 4, T, 8);
+      }
+    } else {                                             // испарилась — сухое дно
+      mg.strokeStyle = 'rgba(120,150,170,0.30)'; mg.lineWidth = 2;
+      if (map[y - 1] && map[y - 1][x] !== 'w') {         // след уровня воды
+        mg.beginPath(); mg.moveTo(X, Y + 5); mg.lineTo(X + T, Y + 5); mg.stroke();
+      }
+      mg.strokeStyle = 'rgba(0,0,0,0.35)'; mg.lineWidth = 1.2;
+      for (let i = 0; i < 3; i++) {
+        mg.beginPath(); mg.moveTo(X + 5 + i * 17, Y + T - 6); mg.lineTo(X + 12 + i * 15, Y + T - 22); mg.stroke();
+      }
+    }
+  } else if (ch === 'l') {
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.basalt.f, MAT.basalt.t, MAT.basalt.s);
+      mg.strokeStyle = 'rgba(190,70,30,0.55)'; mg.lineWidth = 2;
+      mg.beginPath(); mg.moveTo(X + 4, Y + T * 0.3); mg.lineTo(X + T * 0.5, Y + T * 0.6); mg.lineTo(X + T - 4, Y + T * 0.35); mg.stroke();
+    } else {
+      mg.fillStyle = '#2a0d06'; mg.fillRect(X, Y, T, T);
+      const g2 = mg.createLinearGradient(0, Y, 0, Y + T);
+      g2.addColorStop(0, '#ffb03a'); g2.addColorStop(0.35, '#e8551a'); g2.addColorStop(1, '#5c1206');
+      mg.fillStyle = g2; mg.fillRect(X, Y + (map[y - 1][x] === 'l' ? 0 : 4), T, T);
+      if (map[y - 1][x] !== 'l') { mg.fillStyle = 'rgba(255,230,150,0.75)'; mg.fillRect(X, Y + 4, T, 5); }
+    }
+  } else if (ch === 'm') {
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.wood.f, MAT.wood.t, MAT.wood.s);
+      mg.strokeStyle = 'rgba(0,0,0,0.45)'; mg.lineWidth = 1.5;
+      for (let i = 1; i < 4; i++) { mg.beginPath(); mg.moveTo(X, Y + i * T / 4); mg.lineTo(X + T, Y + i * T / 4); mg.stroke(); }
+      mg.fillStyle = '#d8c39a';
+      mg.fillRect(X + 5, Y + 5, 3, 3); mg.fillRect(X + T - 8, Y + 5, 3, 3);
+    } else {                                             // мостков нет — обугленные огрызки
+      const edge = map[y][x - 1] !== 'm' || map[y][x + 1] !== 'm';
+      if (edge) {
+        mg.fillStyle = '#2b201a';
+        const sx = map[y][x - 1] !== 'm' ? X : X + T - 12;
+        mg.fillRect(sx, Y + 2, 12, 9);
+        mg.fillStyle = 'rgba(0,0,0,0.6)'; mg.fillRect(sx, Y + 11, 12, 4);
+      }
+      mg.strokeStyle = 'rgba(60,45,35,0.8)'; mg.lineWidth = 2;
+      mg.beginPath(); mg.moveTo(X + T * 0.5, Y); mg.lineTo(X + T * 0.44, Y + 13); mg.stroke();
+    }
+  } else if (ch === 'x') {
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.ice.f, [222, 242, 255], MAT.ice.s);
+      mg.fillStyle = 'rgba(255,255,255,0.30)'; mg.fillRect(X + 6, Y + 6, T * 0.3, T * 0.75);
+      mg.strokeStyle = 'rgba(255,255,255,0.5)'; mg.lineWidth = 1.6;
+      mg.beginPath(); mg.moveTo(X + T * 0.62, Y + 5); mg.lineTo(X + T * 0.44, Y + T - 5); mg.stroke();
+    } else {                                             // растаяла — мокрые потёки
+      mg.strokeStyle = 'rgba(120,170,200,0.35)'; mg.lineWidth = 2;
+      for (let i = 0; i < 2; i++) {
+        mg.beginPath(); mg.moveTo(X + 10 + i * 22, Y); mg.lineTo(X + 8 + i * 22, Y + 14); mg.stroke();
+      }
+    }
+  } else if (ch === 's') {
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.snow.f, MAT.snow.t, MAT.snow.s);
+      mg.fillStyle = 'rgba(255,255,255,0.75)';
+      mg.beginPath(); mg.ellipse(X + T / 2, Y + 3, T * 0.52, 9, 0, 0, 6.3); mg.fill();
+    }
+  } else if (ch === 'n') {
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.bush.f, MAT.bush.t, MAT.bush.s);
+      mg.fillStyle = 'rgba(140,200,90,0.6)';
+      for (let i = 0; i < 9; i++) {
+        const px = X + ((i * 19 + x * 7) % (T - 8)), py = Y + ((i * 13 + y * 5) % (T - 8));
+        mg.beginPath(); mg.ellipse(px + 4, py + 4, 7, 4, i, 0, 6.3); mg.fill();
+      }
+    } else {
+      mg.strokeStyle = 'rgba(90,74,50,0.6)'; mg.lineWidth = 2;
+      mg.beginPath(); mg.moveTo(X + 6, Y + T - 4); mg.lineTo(X + 16, Y + T - 16); mg.stroke();
+    }
+  } else if (ch === 'v') {
+    if (ty === LADDER) {
+      mg.strokeStyle = '#3f7a34'; mg.lineWidth = 6;
+      mg.beginPath(); mg.moveTo(X + T * 0.30, Y); mg.lineTo(X + T * 0.30, Y + T);
+      mg.moveTo(X + T * 0.70, Y); mg.lineTo(X + T * 0.70, Y + T); mg.stroke();
+      mg.strokeStyle = '#57a044'; mg.lineWidth = 4;
+      for (let i = 0; i < 2; i++) {
+        mg.beginPath(); mg.moveTo(X + T * 0.28, Y + 12 + i * 24); mg.lineTo(X + T * 0.72, Y + 16 + i * 24); mg.stroke();
+      }
+      mg.fillStyle = '#6cc251';
+      for (let i = 0; i < 4; i++) {
+        const px = X + (i % 2 ? T * 0.18 : T * 0.78), py = Y + 8 + i * 11;
+        mg.beginPath(); mg.ellipse(px, py, 8, 4.5, i % 2 ? -0.6 : 0.6, 0, 6.3); mg.fill();
+      }
+    } else {                                             // лоз нет — сухие крючья
+      mg.strokeStyle = 'rgba(88,72,52,0.65)'; mg.lineWidth = 2.5;
+      mg.beginPath(); mg.moveTo(X + T * 0.32, Y); mg.lineTo(X + T * 0.36, Y + 15);
+      mg.moveTo(X + T * 0.68, Y); mg.lineTo(X + T * 0.62, Y + 11); mg.stroke();
+    }
+  } else if (ch === 'p') {                               // целое перекрытие прошлого
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.old.f, MAT.old.t, MAT.old.s);
+      mg.strokeStyle = 'rgba(255,230,180,0.28)'; mg.lineWidth = 1.6;
+      mg.strokeRect(X + 5, Y + 5, T - 10, T - 10);
+      mg.fillStyle = 'rgba(255,225,170,0.16)';
+      mg.fillRect(X + 8, Y + 8, T - 16, 5);
+    } else {                                             // от него остались консоли в стене
+      mg.fillStyle = 'rgba(120,104,78,0.5)';
+      mg.fillRect(X, Y + T * 0.42, 11, 9);
+      mg.fillRect(X + T - 11, Y + T * 0.42, 11, 9);
+      mg.strokeStyle = 'rgba(120,104,78,0.35)'; mg.lineWidth = 1.5;
+      mg.setLineDash([6, 7]);
+      mg.beginPath(); mg.moveTo(X, Y + T * 0.46); mg.lineTo(X + T, Y + T * 0.46); mg.stroke();
+      mg.setLineDash([]);
+    }
+  } else if (ch === 'f') {                               // ветхое перекрытие
+    if (ty === SOLID) {
+      drawBlock(x, y, P, MAT.frail.f, MAT.frail.t, MAT.frail.s);
+      mg.strokeStyle = 'rgba(0,0,0,0.5)'; mg.lineWidth = 2;
+      mg.beginPath();
+      mg.moveTo(X + 4, Y + T * 0.25); mg.lineTo(X + T * 0.45, Y + T * 0.6); mg.lineTo(X + T * 0.3, Y + T - 4);
+      mg.moveTo(X + T - 6, Y + T * 0.3); mg.lineTo(X + T * 0.62, Y + T * 0.75);
+      mg.stroke();
+    } else {                                             // обрушилось: щербатый край
+      mg.fillStyle = 'rgba(40,38,42,0.75)';
+      mg.beginPath(); mg.moveTo(X, Y); mg.lineTo(X + 14, Y); mg.lineTo(X + 6, Y + 13); mg.closePath(); mg.fill();
+      mg.beginPath(); mg.moveTo(X + T, Y); mg.lineTo(X + T - 16, Y); mg.lineTo(X + T - 5, Y + 15); mg.closePath(); mg.fill();
+      mg.fillStyle = 'rgba(150,150,160,0.10)';
+      for (let i = 0; i < 3; i++) mg.fillRect(X + 6 + i * 15, Y + 20 + (i % 2) * 9, 5, 5);
+    }
+  } else if (ch === 'r') {                               // обвал будущего
+    if (ty === SOLID) {
+      const c = MAT.rub;
+      mg.fillStyle = rgb(c.f);
+      mg.beginPath(); mg.moveTo(X - 2, Y + T);
+      mg.lineTo(X + 6, Y + 10); mg.lineTo(X + T * 0.45, Y + 2); mg.lineTo(X + T - 4, Y + 14);
+      mg.lineTo(X + T + 2, Y + T); mg.closePath(); mg.fill();
+      mg.fillStyle = rgb(c.t, 0.85);
+      mg.fillRect(X + 8, Y + 12, 16, 11); mg.fillRect(X + T * 0.55, Y + 6, 14, 10);
+      mg.fillStyle = rgb(c.s, 0.9);
+      mg.fillRect(X + 5, Y + T * 0.6, 20, 13); mg.fillRect(X + T * 0.6, Y + T * 0.55, 17, 16);
+      mg.strokeStyle = 'rgba(0,0,0,0.45)'; mg.lineWidth = 1.4;
+      mg.strokeRect(X + 8, Y + 12, 16, 11); mg.strokeRect(X + 5, Y + T * 0.6, 20, 13);
+    }
+  } else if (ch === 't' || ch === 'a') {
+    if (ty === SOLID) {
+      if (ch === 'a') {
+        drawBlock(x, y, P, MAT.brickw.f, MAT.brickw.t, MAT.brickw.s);
+        mg.strokeStyle = 'rgba(0,0,0,0.55)'; mg.lineWidth = 2;
+        mg.beginPath(); mg.moveTo(X + 6, Y + 4); mg.lineTo(X + 20, Y + T * 0.5); mg.lineTo(X + 10, Y + T - 4); mg.stroke();
+        mg.beginPath(); mg.moveTo(X + T - 8, Y + 6); mg.lineTo(X + T - 22, Y + T * 0.6); mg.stroke();
+      } else {
+        drawBlock(x, y, P, MAT.bush.f, MAT.bush.t, MAT.bush.s);
+        mg.strokeStyle = '#3d7a33'; mg.lineWidth = 5;
+        for (let i = 0; i < 3; i++) {
+          mg.beginPath(); mg.moveTo(X + 8 + i * 15, Y);
+          mg.quadraticCurveTo(X + 2 + i * 18, Y + T / 2, X + 12 + i * 14, Y + T); mg.stroke();
+        }
+        mg.fillStyle = 'rgba(150,205,95,0.55)';
+        for (let i = 0; i < 6; i++) {
+          const px = X + ((i * 23 + y * 11) % (T - 10)), py = Y + ((i * 17 + x * 7) % (T - 10));
+          mg.beginPath(); mg.ellipse(px + 5, py + 5, 8, 4, i, 0, 6.3); mg.fill();
+        }
+      }
+    } else {                                             // проём открылся
+      if (ch === 'a' && !isSolid(G.world, x, y + 1)) { }
+      mg.fillStyle = 'rgba(40,34,28,0.55)';
+      if (ch === 'a') for (let i = 0; i < 4; i++) {
+        mg.fillRect(X + 4 + i * 12, Y + T - 8 - (i % 2) * 4, 10, 8);
+      } else {
+        mg.strokeStyle = 'rgba(96,80,52,0.55)'; mg.lineWidth = 2;
+        mg.beginPath(); mg.moveTo(X + 4, Y); mg.lineTo(X + 10, Y + 14);
+        mg.moveTo(X + T - 6, Y); mg.lineTo(X + T - 14, Y + 10); mg.stroke();
+      }
+    }
+  }
+}
+
+function bakeTorch(t, P) {
+  const X = t.x * T, Y = t.y * T;
+  const g2 = mg.createRadialGradient(X, Y - 26, 2, X, Y - 26, 46);
+  g2.addColorStop(0, 'rgba(0,0,0,0.5)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+  mg.fillStyle = g2; mg.fillRect(X - 48, Y - 74, 96, 96);
+  mg.fillStyle = '#2b2620'; mg.fillRect(X - 3, Y - 4, 6, 24);
+  mg.beginPath(); mg.moveTo(X - 10, Y - 12); mg.lineTo(X + 10, Y - 12);
+  mg.lineTo(X + 6, Y + 2); mg.lineTo(X - 6, Y + 2); mg.closePath(); mg.fill();
+  mg.strokeStyle = '#55483a'; mg.lineWidth = 2; mg.stroke();
+  mg.fillStyle = '#1a1512'; mg.fillRect(X - 7, Y - 14, 14, 4);
+}
+
+function bake(keepPrev) {
+  if (!keepPrev) { const t2 = mapPrev; mapPrev = mapCv; mapCv = t2; mg = mapCv.getContext('2d'); }
+  mg.setTransform(1, 0, 0, 1, 0, 0); mg.globalAlpha = 1;
+  mg.clearRect(0, 0, W * T, H * T);
+  const P = pal(G.world);
+  bakeBack(P);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ch = map[y][x];
+    if (ch !== '#' && ch !== '.') bakeTile(x, y, ch, P);
+  }
+  drawAO(P);
+  for (const d of DOORS) bakeDoor(d, P);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (map[y][x] === '#') drawBlock(x, y, P, P.stone, P.top, P.side);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ch = map[y][x];
+    if (ch !== '#' && ch !== '.' && isSolid(G.world, x, y)) bakeTile(x, y, ch, P);
+  }
+  for (const t of TORCHES) bakeTorch(t, P);
+}
+/* ── камера, свет, частицы ─────────────────────────────────────────────── */
+const cam = { x: 0, y: 0 };
+function camUpdate(dt) {
+  const tx = Math.max(0, Math.min(W * T - VIEW_W, G.px - VIEW_W / 2));
+  const ty = Math.max(0, Math.min(H * T - VIEW_H - T * 1.2, G.py - PH / 2 - VIEW_H / 2 - 40));
+  const k = 1 - Math.pow(0.0016, dt);
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
+}
+const lightCv = document.createElement('canvas'); lightCv.width = 500; lightCv.height = 300;
+const lx = lightCv.getContext('2d');
+const snapCv = document.createElement('canvas'); snapCv.width = VIEW_W; snapCv.height = VIEW_H;
+const sx_ = snapCv.getContext('2d');
+const fxCv = document.createElement('canvas'); fxCv.width = VIEW_W; fxCv.height = VIEW_H;
+const fx = fxCv.getContext('2d');
+
+const PTS = [];
+function ptype(w) {
+  const t = wtemp(w), d = wwilt(w), a = [];
+  if (t === 0) a.push('snow'); if (t === 2) a.push('ember');
+  if (d === 0) a.push('ash'); if (d === 2) a.push('spore');
+  if (!a.length) a.push('dust');
+  return a;
+}
+function seedParticles(reset) {
+  if (reset) PTS.length = 0;
+  const kinds = ptype(G.world), N = 190;
+  while (PTS.length < N) PTS.push(newP(kinds[(Math.random() * kinds.length) | 0], true));
+  for (const p of PTS) if (Math.random() < 0.65) { const q = newP(kinds[(Math.random() * kinds.length) | 0], true); Object.assign(p, q); }
+}
+function newP(k, spread, x, y) {
+  const p = { k, x: x !== undefined ? x : cam.x + Math.random() * VIEW_W, y: y !== undefined ? y : cam.y + Math.random() * VIEW_H, l: 1, z: Math.random() };
+  if (k === 'snow') { p.vx = -14 + Math.random() * 28; p.vy = 26 + Math.random() * 40; p.s = 1.4 + Math.random() * 2.4; p.c = '#dceeff'; }
+  if (k === 'ember') { p.vx = -18 + Math.random() * 36; p.vy = -34 - Math.random() * 60; p.s = 1.2 + Math.random() * 2.2; p.c = '#ff9d3c'; }
+  if (k === 'ash') { p.vx = -10 + Math.random() * 20; p.vy = 14 + Math.random() * 26; p.s = 1.1 + Math.random() * 2.0; p.c = '#8d8a84'; }
+  if (k === 'spore') { p.vx = -12 + Math.random() * 24; p.vy = -12 + Math.random() * 10; p.s = 1.6 + Math.random() * 2.6; p.c = '#b6e88a'; }
+  if (k === 'dust') { p.vx = -6 + Math.random() * 12; p.vy = -4 + Math.random() * 12; p.s = 1.0 + Math.random() * 1.5; p.c = '#8e93a8'; }
+  if (spread) p.l = Math.random();
+  return p;
+}
+function burst(x, y, n) {
+  const kinds = ptype(G.world);
+  for (let i = 0; i < n; i++) {
+    const p = newP(kinds[(Math.random() * kinds.length) | 0], false, x, y);
+    const a = Math.random() * 6.3, v = 60 + Math.random() * 320;
+    p.vx = Math.cos(a) * v; p.vy = Math.sin(a) * v * 0.7; p.boost = 1;
+    PTS.push(p);
+  }
+}
+function stepParticles(dt) {
+  for (let i = PTS.length - 1; i >= 0; i--) {
+    const p = PTS[i];
+    p.x += p.vx * dt * (0.55 + p.z * 0.9); p.y += p.vy * dt * (0.55 + p.z * 0.9);
+    if (p.k === 'spore') { p.x += Math.sin(G.t * 1.7 + p.z * 9) * 12 * dt; p.vy += (Math.sin(G.t + p.z * 6) * 5 - p.vy) * dt * 0.6; }
+    if (p.k === 'snow') p.x += Math.sin(G.t * 1.1 + p.z * 7) * 16 * dt;
+    if (p.boost) { p.vx *= 0.955; p.vy *= 0.955; p.l -= dt * 0.75; if (p.l <= 0) { PTS.splice(i, 1); continue; } }
+    const mx = p.x - cam.x, my = p.y - cam.y;
+    if (mx < -60 || mx > VIEW_W + 60 || my < -60 || my > VIEW_H + 60) {
+      if (p.boost) { PTS.splice(i, 1); continue; }
+      Object.assign(p, newP(p.k, false));
+      if (p.vy > 0) p.y = cam.y - 20; else if (p.vy < 0) p.y = cam.y + VIEW_H + 20;
+      p.x = cam.x + Math.random() * VIEW_W;
+    }
+  }
+}
+function drawParticles(front) {
+  for (const p of PTS) {
+    if ((p.z > 0.55) !== front) continue;
+    const X = p.x - cam.x, Y = p.y - cam.y;
+    ctx.globalAlpha = (p.boost ? Math.max(0, p.l) : 0.25 + p.z * 0.6) * (p.k === 'ember' ? 1 : 0.85);
+    ctx.fillStyle = p.c;
+    if (p.k === 'ember') {
+      ctx.shadowColor = '#ff7a1c'; ctx.shadowBlur = 9;
+      ctx.fillRect(X, Y, p.s * 1.5, p.s * 1.5); ctx.shadowBlur = 0;
+    } else if (p.k === 'spore') {
+      ctx.beginPath(); ctx.arc(X, Y, p.s, 0, 6.3); ctx.fill();
+    } else ctx.fillRect(X, Y, p.s * 1.6, p.s * (p.k === 'ash' ? 1.2 : 1.6));
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ── герой ─────────────────────────────────────────────────────────────── */
+function drawPlayer() {
+  const X = G.px - cam.x, Y = G.py - cam.y;
+  const walk = Math.sin(G.walkT) * (G.onGround ? 1 : 0.2);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.beginPath(); ctx.ellipse(X, Y - 2, PW * 0.62, 7, 0, 0, 6.3); ctx.fill();
+  ctx.translate(X, Y); ctx.scale(G.face, 1);
+  if (G.dead) { ctx.globalAlpha = Math.max(0.1, 1 - (1 - G.dead) * 1.4); ctx.rotate(0.5 * (1 - G.dead)); }
+  /* ноги */
+  ctx.fillStyle = '#20232c';
+  ctx.fillRect(-10 + walk * 5, -17, 8, 17); ctx.fillRect(2 - walk * 5, -17, 8, 17);
+  ctx.fillStyle = '#14161c';
+  ctx.fillRect(-11 + walk * 5, -4, 10, 4); ctx.fillRect(1 - walk * 5, -4, 10, 4);
+  /* плащ */
+  const gr = ctx.createLinearGradient(0, -PH, 0, 0);
+  gr.addColorStop(0, '#3f7d4b'); gr.addColorStop(0.55, '#2d5c37'); gr.addColorStop(1, '#1b3a24');
+  ctx.fillStyle = gr;
+  ctx.beginPath();
+  ctx.moveTo(-16 - walk * 2, -6);
+  ctx.lineTo(-13, -PH * 0.62);
+  ctx.quadraticCurveTo(-11, -PH * 0.82, 0, -PH * 0.84);
+  ctx.quadraticCurveTo(11, -PH * 0.82, 13, -PH * 0.62);
+  ctx.lineTo(16 + walk * 2, -6);
+  ctx.quadraticCurveTo(0, -12, -16 - walk * 2, -6);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(150,220,150,0.28)'; ctx.lineWidth = 1.6; ctx.stroke();
+  /* капюшон */
+  const hy = -PH * 0.80;
+  ctx.fillStyle = '#3a7146';
+  ctx.beginPath();
+  ctx.moveTo(-13, hy + 15);                       // затылок
+  ctx.quadraticCurveTo(-16, hy - 13, -1, hy - 15);
+  ctx.quadraticCurveTo(12, hy - 14, 14, hy + 1);  // козырёк вперёд
+  ctx.lineTo(11, hy + 6);
+  ctx.quadraticCurveTo(4, hy + 12, -13, hy + 15);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(180,235,170,0.30)'; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.fillStyle = '#0c1012';                      // тень лица
+  ctx.beginPath(); ctx.ellipse(4, hy + 2, 7.5, 6.5, -0.2, 0, 6.3); ctx.fill();
+  ctx.fillStyle = '#cdf0b4';
+  ctx.beginPath(); ctx.ellipse(5.5, hy + 1, 2.1, 1.5, 0, 0, 6.3); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(9.6, hy + 1.6, 1.5, 1.2, 0, 0, 6.3); ctx.fill();
+  ctx.fillStyle = '#2a5533';                      // плечи-накидка
+  ctx.beginPath();
+  ctx.moveTo(-15, hy + 13); ctx.quadraticCurveTo(0, hy + 26, 15, hy + 12);
+  ctx.quadraticCurveTo(0, hy + 19, -15, hy + 13); ctx.closePath(); ctx.fill();
+  /* пояс и осколок девайса */
+  ctx.fillStyle = '#20323f'; ctx.fillRect(-14, -PH * 0.40, 28, 5);
+  const lit = PARTS.filter(p => G.parts & p.bit).pop();
+  ctx.fillStyle = lit ? lit.col : '#5a6270';
+  ctx.beginPath(); ctx.arc(9, -PH * 0.375, 3.6, 0, 6.3); ctx.fill();
+  ctx.restore();
+}
+
+/* ── кристаллы частей (одинаковые во всех мирах) ───────────────────────── */
+function drawParts() {
+  for (const p of PARTS) {
+    if (G.parts & p.bit) continue;
+    const X = (p.x + 0.5) * T - cam.x, Y = (p.y + 0.5) * T - cam.y;
+    if (X < -80 || X > VIEW_W + 80 || Y < -80 || Y > VIEW_H + 80) continue;
+    const pu = 0.5 + 0.5 * Math.sin(G.t * 2.4), r = T * 0.26 * (0.94 + pu * 0.12);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g2 = ctx.createRadialGradient(X, Y, 0, X, Y, T * (1.3 + pu * 0.35));
+    g2.addColorStop(0, p.col); g2.addColorStop(0.25, 'rgba(255,255,255,0.18)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.55; ctx.fillStyle = g2;
+    ctx.fillRect(X - T * 2, Y - T * 2, T * 4, T * 4);
+    ctx.restore();
+    ctx.save(); ctx.translate(X, Y + Math.sin(G.t * 1.7) * 3); ctx.rotate(Math.sin(G.t * 0.7) * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 1.5); ctx.lineTo(r * 0.82, -r * 0.2); ctx.lineTo(0, r * 1.5); ctx.lineTo(-r * 0.82, -r * 0.2);
+    ctx.closePath();
+    const g3 = ctx.createLinearGradient(-r, -r, r, r);
+    g3.addColorStop(0, '#ffffff'); g3.addColorStop(0.45, p.col); g3.addColorStop(1, 'rgba(255,255,255,0.55)');
+    ctx.fillStyle = g3; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ── свет ──────────────────────────────────────────────────────────────── */
+function drawLight() {
+  const P = pal(G.world), s = 0.5;
+  lx.globalCompositeOperation = 'source-over';
+  lx.fillStyle = rgb(sh(P.amb, 1.05)); lx.fillRect(0, 0, 500, 300);
+  lx.globalCompositeOperation = 'lighter';
+  const glow = (wx, wy, r, col, a) => {
+    const X = (wx - cam.x) * s, Y = (wy - cam.y) * s;
+    if (X < -r || X > 500 + r || Y < -r || Y > 300 + r) return;
+    const g2 = lx.createRadialGradient(X, Y, 0, X, Y, r);
+    g2.addColorStop(0, col); g2.addColorStop(1, 'rgba(0,0,0,0)');
+    lx.globalAlpha = a; lx.fillStyle = g2; lx.beginPath(); lx.arc(X, Y, r, 0, 6.3); lx.fill();
+  };
+  for (const t of TORCHES) {
+    const fl = 0.86 + 0.14 * Math.sin(G.t * 9 + t.ph) + 0.06 * Math.sin(G.t * 23 + t.ph * 2);
+    glow(t.x * T, t.y * T - 14, 168 * fl, 'rgba(255,196,112,1)', 1);
+    glow(t.x * T, t.y * T - 14, 78 * fl, 'rgba(255,235,190,0.9)', 0.9);
+  }
+  if (wtemp(G.world) !== 0) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+    if (map[y][x] === 'l') glow(x * T + T / 2, y * T, 92, 'rgba(255,110,30,0.85)', 0.8);
+  for (const p of PARTS) if (!(G.parts & p.bit)) glow((p.x + .5) * T, (p.y + .5) * T, 78, p.col, 0.75);
+  for (const d of DOORS) if (doorHere(d, G.world))
+    glow((d.x + .5) * T, (d.y + .4) * T, (G.parts & d.k.need) ? 62 : 34, d.k.gl, (G.parts & d.k.need) ? 0.8 : 0.35);
+  glow(G.px, G.py - PH * 0.55, 95, 'rgba(190,220,255,0.5)', 0.6);
+  lx.globalAlpha = 1;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.imageSmoothingEnabled = true;
+  if (ctx.globalCompositeOperation === 'multiply') {
+    ctx.drawImage(lightCv, 0, 0, VIEW_W, VIEW_H);
+  } else {
+    // браузер не умеет multiply — иначе светокарта легла бы сплошной чернотой
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.45;
+    ctx.drawImage(lightCv, 0, 0, VIEW_W, VIEW_H);
+  }
+  ctx.restore();
+  /* пламя факелов поверх света */
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const t of TORCHES) {
+    const X = t.x * T - cam.x, Y = t.y * T - 16 - cam.y;
+    if (X < -40 || X > VIEW_W + 40 || Y < -40 || Y > VIEW_H + 40) continue;
+    const fl = 0.8 + 0.2 * Math.sin(G.t * 11 + t.ph);
+    const g2 = ctx.createRadialGradient(X, Y, 0, X, Y, 26 * fl);
+    g2.addColorStop(0, 'rgba(255,238,190,0.95)'); g2.addColorStop(0.35, 'rgba(255,150,50,0.55)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g2; ctx.fillRect(X - 30, Y - 34, 60, 60);
+    ctx.fillStyle = 'rgba(255,214,140,0.92)';
+    ctx.beginPath(); ctx.ellipse(X, Y - 3 * fl, 4.2, 9 * fl, 0, 0, 6.3); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawVignette() {
+  const P = pal(G.world);
+  const g2 = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.32, VIEW_W / 2, VIEW_H / 2, VIEW_H * 1.02);
+  g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(0.65, 'rgba(0,0,0,0.26)'); g2.addColorStop(1, 'rgba(0,0,0,0.74)');
+  ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.globalAlpha = 0.13; ctx.fillStyle = rgb(P.amb); ctx.fillRect(0, 0, VIEW_W, VIEW_H); ctx.globalAlpha = 1;
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПЕРЕХОД: камера влетает в дверь · темнота между мирами · вылет наружу
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PH1 = 0.32, PH2 = 0.64, TDUR = 1.10;
+function startTransition(d, w2) {
+  G.trans = { t: 0, dur: TDUR, d, from: G.world, to: w2, swapped: false,
+              sx: (d.x + 0.5) * T, sy: (d.y + 0.15) * T };
+  G.vx = 0; G.vy = 0; G.shake = 0.2;
+}
+function transZoom() {
+  const tr = G.trans;
+  if (!tr) return null;
+  const ez = t => t * t * (3 - 2 * t);
+  let k = 1;
+  if (tr.t < PH1) k = 1 + 5.2 * ez(tr.t / PH1);
+  else if (tr.t < PH2) k = 6.2;
+  else k = 1 + 5.2 * (1 - ez(Math.min(1, (tr.t - PH2) / (tr.dur - PH2))));
+  return { k, x: tr.sx - cam.x, y: tr.sy - cam.y };
+}
+function drawTransitionFX() {
+  const tr = G.trans, col = tr.d.k.gl;
+  const dx = tr.sx - cam.x, dy = tr.sy - cam.y;
+  /* ФАЗА 1 — разгон в проём: смаз к краям и стремительное затемнение */
+  if (tr.t < PH1) {
+    const u = tr.t / PH1;
+    fx.clearRect(0, 0, VIEW_W, VIEW_H); fx.drawImage(cv, 0, 0);
+    ctx.save(); ctx.globalAlpha = 0.34;
+    for (let i = 1; i <= 4; i++) {
+      const s = 1 + 0.045 * i * (0.3 + u);
+      ctx.setTransform(s, 0, 0, s, dx - dx * s, dy - dy * s);
+      ctx.drawImage(fxCv, 0, 0);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.restore();
+    const R = Math.max(24, (1 - u) * VIEW_H * 0.9);
+    const g2 = ctx.createRadialGradient(dx, dy, R * 0.15, dx, dy, R);
+    g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(0.55, 'rgba(0,0,0,' + (0.35 + u * 0.5) + ')');
+    g2.addColorStop(1, 'rgba(0,0,0,' + (0.75 + u * 0.25) + ')');
+    ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.30 + u * 0.5; ctx.strokeStyle = col; ctx.lineWidth = 4 + u * 16;
+    ctx.beginPath(); ctx.ellipse(dx, dy, 30 + u * 260, 44 + u * 330, 0, 0, 6.3); ctx.stroke();
+    ctx.restore();
+  }
+  /* ФАЗА 2 — между мирами: темнота и полосы света мимо камеры */
+  if (tr.t >= PH1 && tr.t < PH2) {
+    const u = (tr.t - PH1) / (PH2 - PH1);
+    ctx.fillStyle = '#05060c'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 90; i++) {
+      const a = (i * 2.399) % 6.2832, sp = 0.25 + ((i * 37) % 100) / 100;
+      const t0 = (u * 2.1 * sp + ((i * 13) % 100) / 100) % 1;
+      const r0 = t0 * 900, len = 60 + t0 * 420;
+      const cx = VIEW_W / 2, cy = VIEW_H / 2;
+      ctx.strokeStyle = i % 5 === 0 ? col : 'rgba(190,210,255,0.85)';
+      ctx.globalAlpha = Math.min(1, t0 * 3) * (1 - t0) * 0.9;
+      ctx.lineWidth = 1 + t0 * 3;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.7);
+      ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len) * 0.7);
+      ctx.stroke();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+    /* куда сместились по осям — крупные лимбы */
+    drawDials(VIEW_W / 2 - 46 * 3.35, VIEW_H / 2 - 6, 46, true, tr.d.k.axis);
+    ctx.textAlign = 'center';
+    ctx.font = '600 12px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(190,200,230,' + (0.4 + 0.6 * Math.sin(u * 3.14)) + ')';
+    ctx.fillText('М Е Ж Д У   М И Р А М И', VIEW_W / 2, VIEW_H / 2 - 92);
+  }
+  /* ФАЗА 3 — вылет из проёма в новом мире */
+  if (tr.t >= PH2) {
+    const u = Math.min(1, (tr.t - PH2) / (tr.dur - PH2));
+    const R = 40 + u * VIEW_H * 1.1;
+    const g2 = ctx.createRadialGradient(dx, dy, R * 0.2, dx, dy, R);
+    g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(0.7, 'rgba(0,0,0,' + (0.55 * (1 - u)) + ')');
+    g2.addColorStop(1, 'rgba(0,0,0,' + (0.95 * (1 - u)) + ')');
+    ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = (1 - u) * 0.75; ctx.strokeStyle = col; ctx.lineWidth = 3 + (1 - u) * 14;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy, 30 + (1 - u) * 300, 44 + (1 - u) * 380, 0, 0, 6.3); ctx.stroke();
+    ctx.restore();
+    /* имя новой версии мира */
+    const la = Math.min(1, u * 2.6) * Math.min(1, (1.15 - u) * 3);
+    if (la > 0.01) {
+      ctx.save(); ctx.globalAlpha = la; ctx.textAlign = 'center';
+      ctx.font = '600 12px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(210,220,245,0.8)';
+      ctx.fillText(worldShort(G.world), VIEW_W / 2, VIEW_H * 0.24);
+      ctx.font = '700 38px "Segoe UI",sans-serif';
+      ctx.shadowColor = col; ctx.shadowBlur = 28; ctx.fillStyle = '#fff';
+      ctx.fillText(worldName(G.world), VIEW_W / 2, VIEW_H * 0.24 + 40);
+      ctx.restore();
+    }
+  }
+}
+
+/* ── интерфейс ─────────────────────────────────────────────────────────── */
+function panel(x, y, w, h, a) {
+  ctx.fillStyle = 'rgba(8,10,16,' + (a || 0.78) + ')';
+  ctx.strokeStyle = 'rgba(120,132,168,0.35)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill(); ctx.stroke();
+}
+/* ── прибор: три лимба по числу осей ───────────────────────────────────── */
+const AXIS_NEED = [PART_TERMO, PART_BIO, PART_CHRONO];
+const AXIS_NEEDNAME = ['термоядро', 'биоядро', 'хроноядро'];
+const AXIS_COL = ['#8fd0f5', '#9ee08f', '#c8b0f5'];
+function drawDials(x, y, r, big, hl) {
+  for (let a = 0; a < 3; a++) {
+    const cx = x + a * (r * (big ? 3.35 : 2.55)), cy = y;
+    const open = !!(G.parts & AXIS_NEED[a]), val = waxis(G.world, a);
+    const hot = hl === a;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.3);
+    ctx.fillStyle = 'rgba(10,13,20,0.92)'; ctx.fill();
+    ctx.strokeStyle = open ? (hot ? '#fff' : 'rgba(150,166,205,0.65)') : 'rgba(90,96,120,0.4)';
+    ctx.lineWidth = hot ? 2.6 : 1.6; ctx.stroke();
+    if (open) {
+      ctx.beginPath(); ctx.arc(cx, cy, r * 0.86, 0, 6.3);
+      ctx.strokeStyle = rgb(mixc([20, 24, 34], [255, 255, 255], 0.10)); ctx.lineWidth = 1; ctx.stroke();
+    }
+    for (let v = 0; v < 3; v++) {
+      const ang = -Math.PI / 2 + (v - 1) * 0.85;
+      const on = v === val && open;
+      ctx.strokeStyle = on ? AXIS_COL[a] : (open ? 'rgba(140,150,180,0.45)' : 'rgba(90,96,120,0.3)');
+      ctx.lineWidth = on ? 3 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * r * 0.66, cy + Math.sin(ang) * r * 0.66);
+      ctx.lineTo(cx + Math.cos(ang) * r * 0.88, cy + Math.sin(ang) * r * 0.88);
+      ctx.stroke();
+      if (big) {
+        ctx.font = '600 9px "Segoe UI",sans-serif';
+        ctx.textAlign = 'center'; ctx.fillStyle = on ? AXIS_COL[a] : 'rgba(130,140,170,0.55)';
+        ctx.fillText(AXIS_VALS[a][v], cx + Math.cos(ang) * r * 1.32, cy + Math.sin(ang) * r * 1.32 + 3);
+      }
+    }
+    if (open) {
+      const ang = -Math.PI / 2 + G.needle[a];
+      ctx.strokeStyle = hot ? '#fff' : AXIS_COL[a];
+      ctx.lineWidth = big ? 3.4 : 2.4; ctx.lineCap = 'round';
+      ctx.shadowColor = AXIS_COL[a]; ctx.shadowBlur = hot ? 16 : 7;
+      ctx.beginPath(); ctx.moveTo(cx - Math.cos(ang) * r * 0.16, cy - Math.sin(ang) * r * 0.16);
+      ctx.lineTo(cx + Math.cos(ang) * r * 0.7, cy + Math.sin(ang) * r * 0.7); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(cx, cy, r * 0.12, 0, 6.3); ctx.fillStyle = AXIS_COL[a]; ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(120,128,155,0.5)';
+      ctx.fillRect(cx - 5, cy - 2, 10, 8);
+      ctx.strokeStyle = 'rgba(120,128,155,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy - 2, 4, Math.PI, 0); ctx.stroke();
+    }
+    ctx.textAlign = 'center';
+    ctx.font = '600 8px "Segoe UI",sans-serif';
+    ctx.fillStyle = open ? 'rgba(160,170,200,0.8)' : 'rgba(110,118,145,0.55)';
+    ctx.fillText(AXIS_NAMES[a], cx, cy + r + 13);
+    ctx.font = (open ? '700 ' : '400 ') + (big ? 12 : 10) + 'px "Segoe UI",sans-serif';
+    ctx.fillStyle = open ? AXIS_COL[a] : 'rgba(190,140,95,0.8)';
+    ctx.fillText(open ? AXIS_VALS[a][val] : 'нужна часть', cx, cy + r + (big ? 27 : 25));
+    if (!open) {
+      ctx.font = '400 8px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(190,140,95,0.7)';
+      ctx.fillText(AXIS_NEEDNAME[a], cx, cy + r + (big ? 38 : 35));
+    }
+    ctx.restore();
+  }
+}
+function drawHUD() {
+  /* прибор: три лимба */
+  panel(12, 12, 258, 108);
+  ctx.textAlign = 'center';
+  ctx.font = '600 8.5px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(140,150,180,0.7)';
+  ctx.fillText('Д Е В А Й С', 141, 26);
+  drawDials(56, 60, 25, false, G.trans ? G.trans.d.k.axis : -1);
+  /* части */
+  panel(VIEW_W - 302, 12, 290, 56);
+  ctx.textAlign = 'left';
+  ctx.font = '600 9px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(150,160,190,0.85)';
+  ctx.fillText('ЧАСТИ ДЕВАЙСА', VIEW_W - 290, 28);
+  PARTS.forEach((p, i) => {
+    const X = VIEW_W - 288 + i * 72, Y = 48, has = G.parts & p.bit;
+    ctx.save(); ctx.globalAlpha = has ? 1 : 0.26; ctx.translate(X, Y);
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(5, -1.5); ctx.lineTo(0, 9); ctx.lineTo(-5, -1.5); ctx.closePath();
+    ctx.fillStyle = has ? p.col : '#59607a'; ctx.fill();
+    ctx.restore();
+    ctx.font = '600 8px "Segoe UI",sans-serif';
+    ctx.fillStyle = has ? p.col : 'rgba(120,128,152,0.5)';
+    ctx.fillText(p.name, X + 9, Y + 3);
+  });
+  /* подсказка у двери */
+  if (G.near && !G.trans && !G.win) {
+    const d = G.near, here = doorHere(d, G.world), can = G.parts & d.k.need;
+    const X = (d.x + 0.5) * T - cam.x, Y = (d.y - 0.35) * T - cam.y;
+    let t1, t2, c;
+    if (!here) { t1 = 'ЗАЛОЖЕННЫЙ ПРОЁМ'; t2 = 'здесь была ' + d.k.name.toLowerCase() + ' — в этом мире её нет'; c = 'rgba(150,158,186,0.9)'; }
+    else if (!can) { t1 = d.k.name + ' · ЗАПЕРТА'; t2 = 'нужна часть: ' + d.k.needName; c = '#e0a35c'; }
+    else {
+      const w2 = doorDest(d, G.world);
+      t1 = 'E · ' + d.k.name; t2 = worldName(G.world) + '  →  ' + worldName(w2); c = d.k.gl;
+    }
+    ctx.font = '700 12px "Segoe UI",sans-serif';
+    const w = Math.max(ctx.measureText(t1).width, 0) + 24;
+    ctx.font = '400 11px "Segoe UI",sans-serif';
+    const w2b = Math.max(w, ctx.measureText(t2).width + 24);
+    panel(X - w2b / 2, Y - 44, w2b, 42, 0.86);
+    ctx.textAlign = 'center';
+    ctx.font = '700 12px "Segoe UI",sans-serif'; ctx.fillStyle = c;
+    ctx.fillText(t1, X, Y - 26);
+    ctx.font = '400 10.5px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(180,188,212,0.85)';
+    ctx.fillText(t2, X, Y - 11);
+  }
+  /* сообщение */
+  if (G.msgT > 0 && G.msg) {
+    ctx.globalAlpha = Math.min(1, G.msgT * 2);
+    ctx.textAlign = 'center';
+    ctx.font = '600 13px "Segoe UI",sans-serif';
+    const w = ctx.measureText(G.msg).width + 34;
+    panel(VIEW_W / 2 - w / 2, VIEW_H - 58, w, 30, 0.8);
+    ctx.fillStyle = 'rgba(222,230,248,0.95)';
+    ctx.fillText(G.msg, VIEW_W / 2, VIEW_H - 38);
+    ctx.globalAlpha = 1;
+  }
+  /* карта миров */
+  if (G.showMap) {
+    const bw = 430, bh = 210, bx = VIEW_W / 2 - bw / 2, by = VIEW_H / 2 - bh / 2;
+    panel(bx, by, bw, bh, 0.93);
+    ctx.textAlign = 'center'; ctx.font = '600 10px "Segoe UI",sans-serif';
+    ctx.fillStyle = 'rgba(150,160,190,0.8)';
+    ctx.fillText('ДВАДЦАТЬ СЕМЬ ВЕРСИЙ ОДНОЙ КАРТЫ', bx + bw / 2, by + 22);
+    for (let a = 0; a < 3; a++) {
+      const Y = by + 56 + a * 42, open = !!(G.parts & AXIS_NEED[a]);
+      ctx.textAlign = 'right'; ctx.font = '600 9px "Segoe UI",sans-serif';
+      ctx.fillStyle = open ? 'rgba(160,170,200,0.85)' : 'rgba(110,118,145,0.5)';
+      ctx.fillText(AXIS_NAMES[a], bx + 108, Y + 4);
+      for (let v = 0; v < 3; v++) {
+        const X = bx + 130 + v * 100, on = waxis(G.world, a) === v;
+        ctx.fillStyle = on ? 'rgba(120,190,240,0.18)' : 'rgba(255,255,255,0.03)';
+        ctx.strokeStyle = on ? AXIS_COL[a] : 'rgba(120,132,168,0.22)';
+        ctx.lineWidth = on ? 2 : 1;
+        ctx.beginPath(); ctx.roundRect(X - 44, Y - 13, 88, 26, 4); ctx.fill(); ctx.stroke();
+        ctx.textAlign = 'center'; ctx.font = (on ? '700 ' : '400 ') + '9.5px "Segoe UI",sans-serif';
+        ctx.fillStyle = on ? '#e6efff' : (open ? 'rgba(150,158,186,0.6)' : 'rgba(110,118,145,0.45)');
+        ctx.fillText(AXIS_VALS[a][v], X, Y + 4);
+      }
+    }
+    ctx.textAlign = 'center';
+    ctx.font = '600 10.5px "Segoe UI",sans-serif'; ctx.fillStyle = '#dfe6f8';
+    ctx.fillText(worldName(G.world), bx + bw / 2, by + bh - 30);
+    ctx.font = '400 9.5px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(140,150,180,0.7)';
+    ctx.fillText('дверь двигает одну ось на шаг · назад той же дверью нельзя', bx + bw / 2, by + bh - 13);
+  }
+  /* смерть / победа */
+  if (G.dead > 0) {
+    ctx.fillStyle = 'rgba(90,10,10,' + (0.45 * G.dead) + ')'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+  if (G.win) {
+    ctx.fillStyle = 'rgba(4,6,12,0.72)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.textAlign = 'center';
+    ctx.font = '700 44px "Segoe UI",sans-serif'; ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#b9a3ff'; ctx.shadowBlur = 30;
+    ctx.fillText('ДЕВАЙС СОБРАН', VIEW_W / 2, VIEW_H / 2 - 6);
+    ctx.shadowBlur = 0;
+    ctx.font = '400 14px "Segoe UI",sans-serif'; ctx.fillStyle = 'rgba(200,210,235,0.85)';
+    ctx.fillText('три части найдены · девять версий карты пройдены · R — заново', VIEW_W / 2, VIEW_H / 2 + 28);
+  }
+  if (G.flash > 0) {
+    ctx.globalAlpha = G.flash * 0.35; ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H); ctx.globalAlpha = 1;
+  }
+}
+
+/* ── кадр ──────────────────────────────────────────────────────────────── */
+/* волна перестройки: пока она не дошла — на месте видна СТАРАЯ версия */
+function drawWorldMap() {
+  ctx.drawImage(mapCv, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  if (!G.wave) return;
+  const wv = G.wave, u = wv.t / wv.dur;
+  const wx = wv.x - cam.x, wy = wv.y - cam.y;
+  if (u < 1) {
+    const R = u * 1500;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-VIEW_W, -VIEW_H, VIEW_W * 3, VIEW_H * 3);
+    ctx.arc(wx, wy, R, 0, 6.2832, true);
+    ctx.clip('evenodd');
+    ctx.drawImage(mapPrev, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    ctx.restore();
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = wv.col; ctx.globalAlpha = 0.75; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.arc(wx, wy, R, 0, 6.3); ctx.stroke();
+    ctx.globalAlpha = 0.30; ctx.lineWidth = 26;
+    ctx.beginPath(); ctx.arc(wx, wy, R, 0, 6.3); ctx.stroke();
+    ctx.restore();
+  }
+  /* призрак старой версии поверх новой — видно, что именно изменилось */
+  const ga = Math.max(0, 0.42 * (1 - Math.max(0, wv.t - wv.dur * 0.55) / 0.85));
+  if (ga > 0.01) {
+    ctx.save(); ctx.globalAlpha = ga;
+    ctx.drawImage(mapPrev, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    ctx.restore();
+  }
+}
+function render() {
+  ctx.save();
+  if (G.shake > 0) ctx.translate((Math.random() - 0.5) * G.shake * 16, (Math.random() - 0.5) * G.shake * 16);
+  ctx.fillStyle = '#05060b'; ctx.fillRect(-40, -40, VIEW_W + 80, VIEW_H + 80);
+  const z = transZoom();
+  const hide = G.trans && G.trans.t >= PH1 && G.trans.t < PH2;
+  if (!hide) {
+    ctx.save();
+    if (z) { ctx.translate(z.x, z.y); ctx.scale(z.k, z.k); ctx.translate(-z.x, -z.y); }
+    drawParallax();
+    drawWorldMap();
+    drawParticles(false);
+    drawParts();
+    if (!G.trans) drawPlayer();
+    drawParticles(true);
+    drawLight();
+    drawVignette();
+    ctx.restore();
+  }
+  ctx.restore();
+  if (G.trans) drawTransitionFX();
+  drawHUD();
+}
+function update(dt) {
+  G.t += dt;
+  G.shake = Math.max(0, G.shake - dt * 2.0);
+  G.flash = Math.max(0, G.flash - dt * 2.6);
+  G.msgT = Math.max(0, G.msgT - dt);
+  for (let a = 0; a < 3; a++) {
+    const tgt = (waxis(G.world, a) - 1) * 0.85;
+    G.needle[a] += (tgt - G.needle[a]) * Math.min(1, dt * 8.5);
+  }
+  if (G.wave) { G.wave.t += dt; if (G.wave.t > G.wave.dur + 1.0) G.wave = null; }
+  if (G.trans) {
+    const tr = G.trans; tr.t += dt;
+    if (!tr.swapped && tr.t >= PH1) {                    // мир меняется, пока экран тёмный
+      tr.swapped = true;
+      G.world = tr.to; bake();
+      PTS.length = 0; seedParticles(true);
+      burst(tr.sx, tr.sy, 120);
+      G.wave = { t: 0, dur: 0.78, x: tr.sx, y: tr.sy, col: tr.d.k.gl };
+      G.shake = 0.4;
+      say(AXIS_NAMES[tr.d.k.axis] + ' → ' + AXIS_VALS[tr.d.k.axis][waxis(G.world, tr.d.k.axis)] +
+          '. Этой двери здесь больше нет.', 3.4);
+    }
+    if (tr.t >= tr.dur) G.trans = null;
+  }
+  else if (G.dead > 0) {
+    G.dead -= dt * 1.5;
+    if (G.dead <= 0) { G.dead = 0; G.px = G.safe[0]; G.py = G.safe[1]; G.vx = G.vy = 0; G.flash = 0.5; }
+  } else if (!G.win) physics(dt);
+  G.near = G.trans ? null : nearDoor();
+  camUpdate(dt); stepParticles(dt);
+}
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.034, (now - last) / 1000); last = now;
+  update(dt); render();
+  requestAnimationFrame(loop);
+}
+cam.x = Math.max(0, Math.min(W * T - VIEW_W, G.px - VIEW_W / 2));
+cam.y = Math.max(0, Math.min(H * T - VIEW_H - T * 1.2, G.py - VIEW_H / 2 - 40));
+bake(); seedParticles(true);
+say('Девайс разбился. Собери четыре части. Двери работают в одну сторону.', 4.5);
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
