@@ -750,16 +750,22 @@ function pal(w) {
 }
 
 /* ── дальний план: у каждой эпохи свой силуэт ──────────────────────────── */
+/* небо зависит только от версии мира — кэшируем градиент на каждый мир,
+   а не пересобираем его в каждом кадре */
+const SKY_CACHE = new Map();
 function drawParallax() {
   const P = pal(G.world), e = P.e, t = P.t, d = P.d;
-  const sky = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-  const c1 = mixc(P.amb, [255, 255, 255], 0.18), c2 = sh(P.amb, 0.45);
-  sky.addColorStop(0, rgb(c1)); sky.addColorStop(1, rgb(c2));
+  let sky = SKY_CACHE.get(G.world);
+  if (!sky) {
+    sky = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+    sky.addColorStop(0, rgb(mixc(P.amb, [255, 255, 255], 0.18)));
+    sky.addColorStop(1, rgb(sh(P.amb, 0.45)));
+    SKY_CACHE.set(G.world, sky);
+  }
   ctx.fillStyle = sky; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   if (t === 2) {                                        // зарево жары
-    const g2 = ctx.createRadialGradient(VIEW_W * 0.5, VIEW_H, 20, VIEW_W * 0.5, VIEW_H, VIEW_H);
-    g2.addColorStop(0, 'rgba(220,90,30,0.55)'); g2.addColorStop(1, 'rgba(220,90,30,0)');
-    ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const rr = VIEW_H;
+    ctx.drawImage(glowSprite('rgba(220,90,30,0.55)'), VIEW_W * 0.5 - rr, VIEW_H - rr, rr * 2, rr * 2);
   }
   const ox = -cam.x * 0.22, oy = -cam.y * 0.10;
   ctx.save(); ctx.translate(ox % 420 - 60, oy);
@@ -1392,6 +1398,28 @@ function drawParts() {
   }
 }
 
+/* ── кэш бликов ─────────────────────────────────────────────────────────
+   Раньше на каждый блик каждый кадр создавался новый радиальный градиент —
+   десятки штук за кадр, и это была основная просадка. Теперь градиент
+   рисуется ОДИН раз в спрайт на каждый цвет, а дальше только drawImage. */
+const GLOW_SPRITES = new Map();
+function glowSprite(col) {
+  let c = GLOW_SPRITES.get(col);
+  if (c) return c;
+  const R = 64;
+  c = document.createElement('canvas'); c.width = c.height = R * 2;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(R, R, 0, R, R, R);
+  gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, R * 2, R * 2);
+  GLOW_SPRITES.set(col, c);
+  return c;
+}
+/* позиции лавы неизменны — считаем один раз, а не сканируем карту каждый кадр */
+const LAVA_CELLS = [];
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+  if (map[y][x] === 'l') LAVA_CELLS.push([x * T + T / 2, y * T]);
+
 /* ── свет ──────────────────────────────────────────────────────────────── */
 function drawLight() {
   const P = pal(G.world), s = 0.5;
@@ -1401,17 +1429,15 @@ function drawLight() {
   const glow = (wx, wy, r, col, a) => {
     const X = (wx - cam.x) * s, Y = (wy - cam.y) * s;
     if (X < -r || X > 500 + r || Y < -r || Y > 300 + r) return;
-    const g2 = lx.createRadialGradient(X, Y, 0, X, Y, r);
-    g2.addColorStop(0, col); g2.addColorStop(1, 'rgba(0,0,0,0)');
-    lx.globalAlpha = a; lx.fillStyle = g2; lx.beginPath(); lx.arc(X, Y, r, 0, 6.3); lx.fill();
+    lx.globalAlpha = a;
+    lx.drawImage(glowSprite(col), X - r, Y - r, r * 2, r * 2);
   };
   for (const t of TORCHES) {
     const fl = 0.86 + 0.14 * Math.sin(G.t * 9 + t.ph) + 0.06 * Math.sin(G.t * 23 + t.ph * 2);
     glow(t.x * T, t.y * T - 14, 168 * fl, 'rgba(255,196,112,1)', 1);
     glow(t.x * T, t.y * T - 14, 78 * fl, 'rgba(255,235,190,0.9)', 0.9);
   }
-  if (wtemp(G.world) !== 0) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-    if (map[y][x] === 'l') glow(x * T + T / 2, y * T, 92, 'rgba(255,110,30,0.85)', 0.8);
+  if (wtemp(G.world) !== 0) for (const [lxp, lyp] of LAVA_CELLS) glow(lxp, lyp, 92, 'rgba(255,110,30,0.85)', 0.8);
   for (const p of PARTS) if (!(G.parts & p.bit)) glow((p.x + .5) * T, (p.y + .5) * T, 78, p.col, 0.75);
   for (const d of DOORS) if (doorHere(d, G.world))
     glow((d.x + .5) * T, (d.y + .4) * T, (G.parts & d.k.need) ? 62 : 34, d.k.gl, (G.parts & d.k.need) ? 0.8 : 0.35);
@@ -1435,19 +1461,22 @@ function drawLight() {
     const X = t.x * T - cam.x, Y = t.y * T - 16 - cam.y;
     if (X < -40 || X > VIEW_W + 40 || Y < -40 || Y > VIEW_H + 40) continue;
     const fl = 0.8 + 0.2 * Math.sin(G.t * 11 + t.ph);
-    const g2 = ctx.createRadialGradient(X, Y, 0, X, Y, 26 * fl);
-    g2.addColorStop(0, 'rgba(255,238,190,0.95)'); g2.addColorStop(0.35, 'rgba(255,150,50,0.55)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g2; ctx.fillRect(X - 30, Y - 34, 60, 60);
+    const rr = 26 * fl;
+    ctx.drawImage(glowSprite('rgba(255,214,150,0.95)'), X - rr, Y - rr, rr * 2, rr * 2);
     ctx.fillStyle = 'rgba(255,214,140,0.92)';
     ctx.beginPath(); ctx.ellipse(X, Y - 3 * fl, 4.2, 9 * fl, 0, 0, 6.3); ctx.fill();
   }
   ctx.restore();
 }
+/* виньетка неподвижна — считаем градиент один раз, а не каждый кадр */
+let VIGNETTE = null;
 function drawVignette() {
   const P = pal(G.world);
-  const g2 = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.32, VIEW_W / 2, VIEW_H / 2, VIEW_H * 1.02);
-  g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(0.65, 'rgba(0,0,0,0.26)'); g2.addColorStop(1, 'rgba(0,0,0,0.74)');
-  ctx.fillStyle = g2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (!VIGNETTE) {
+    VIGNETTE = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.32, VIEW_W / 2, VIEW_H / 2, VIEW_H * 1.02);
+    VIGNETTE.addColorStop(0, 'rgba(0,0,0,0)'); VIGNETTE.addColorStop(0.65, 'rgba(0,0,0,0.26)'); VIGNETTE.addColorStop(1, 'rgba(0,0,0,0.74)');
+  }
+  ctx.fillStyle = VIGNETTE; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.globalAlpha = 0.13; ctx.fillStyle = rgb(P.amb); ctx.fillRect(0, 0, VIEW_W, VIEW_H); ctx.globalAlpha = 1;
 }
 /* ═══════════════════════════════════════════════════════════════════════════
